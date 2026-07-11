@@ -1,0 +1,9 @@
+# Local resources
+papers/
+data/
+
+# Virtual Environment
+.venv/
+
+# x3 nuzzles pounces on u UwU u so warm
+CLAUDE.MD
