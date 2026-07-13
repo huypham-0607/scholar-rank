@@ -5,5 +5,12 @@ data/
 # Virtual Environment
 .venv/
 
+# Python
+__pycache__/
+
+# Misc
+.vscode/
+
 # x3 nuzzles pounces on u UwU u so warm
-CLAUDE.MD
+CLAUDE.md
+initialization.md
