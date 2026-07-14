@@ -37,7 +37,7 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | ------------------------- | ------------- | ------------------------------------------------------------------|
 | `id`                      | `string`      | OpenAlex ID id for this source.                                   |
 | `display_name`            | `string`      | Name of the source.                                               |
-| `type`                    | `string`      | Source type (eg. book series, conferences,...).                   |
+| `type`                    | `enum<string>`| Source type (eg. book series, conferences,...).                   |
 
 ## All fields for "topic"
 
@@ -45,4 +45,10 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | ------------------------- | ------------- | ------------------------------------------------------------------|
 | `id`                      | `string`      | OpenAlex ID id for this topic.                                    |
 | `display_name`            | `string`      | Name of the topic.                                                |
-| `score`                   | `number`      | OpenAlex score for topic relevance.                               |
+| `score`                   | `int`         | OpenAlex score for topic relevance.                               |
+| `subfield_id`             | `string`      | OpenAlex ID for subfield.                                      |
+| `subfield_display_name`   | `string`      | OpenAlex ID for subfield.                                      |
+| `field_id`                | `string`      | OpenAlex ID for field.                                         |
+| `field_display_name`      | `string`      | OpenAlex ID for field.                                         |
+| `domain_id`               | `string`      | OpenAlex score for domain.                                        |
+| `domain_display_name`     | `string`      | OpenAlex score for domain.                                        |
