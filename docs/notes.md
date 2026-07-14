@@ -1,4 +1,7 @@
 # Notes
 
+## Amazon S3 Storage & Boto3
 
-## PageRank
+Boring API slop
+
+## DuckDB & parquet files processing

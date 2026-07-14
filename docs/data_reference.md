@@ -10,7 +10,7 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | `id`                      | `string`      | OpenAlex ID for this work.                                        |
 | `doi`                     | `string`      | The DOI for the work. This is the Canonical External ID for works.|
 | `title`                   | `string/null` | The title of this work.                                           |
-| `authorship`              | `author[]`    | The **first 3 author names** of a work.                           |
+| `authorships`              | `author[]`    | The **first 3 author names** of a work.                           |
 | `authorship_truncated`    | `bool`        | Whether authorship is truncated.                                  |
 | `abstract_inverted_index` | `object/null` | The abstract as an inverted index (word positions).               |
 | `type`                    | `string`      | The type of the work. Common values: article, book, dataset.      |
@@ -18,7 +18,6 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | `primary_location`        | `source`      | A Location object with the primary location of this work.         |
 | `publication_year`        | `int/null`    | The year this work was published.                                 |
 | `publication_date`        | `string/null` | The day when this work was published (ISO 8601 format).           |
-| `language`                | `string/null` | Language in ISO 639-1 format.                                     |
 | `referenced_works`        | `string[]`    | OpenAlex IDs for works that this work cites.                      |
 | `referenced_works_count`  | `int`         | The number of works that this work cites.                         |
 | `cited_by_count`          | `int`         | The number of citations to this work.                             |
