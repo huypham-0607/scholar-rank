@@ -57,16 +57,19 @@ Parquet/zstd, and compared byte sizes.
 | Compact, IDs kept as full OpenAlex URLs | 95.9 | 48.9 GB |
 | Compact, IDs stripped to bare form + topic/source names moved to dimension tables | 87.2 | 44.5 GB |
 
-**Compact works dataset: ~45 GB for the entire 510M-work corpus** — a ~94% reduction from raw. This uses IDs
-stripped of the `https://openalex.org/` prefix (store just `W1234567890`), and moves `topics.display_name` /
-`primary_location.source.display_name` into small side lookup tables (`topics.parquet`, `sources.parquet`,
-each a few thousand–hundred thousand rows, negligible size) joined at query time instead of repeating the
-string in every one of 510M rows.
+**Compact works dataset: ~45 GB for the entire 510M-work corpus (STALE — see note below)** — a ~94% reduction
+from raw. This uses IDs stripped of the `https://openalex.org/` prefix (store just `W1234567890`), and moves
+`topics.display_name` / `primary_location.source.display_name` into small side lookup tables (`topics.parquet`,
+`sources.parquet`, each a few thousand–hundred thousand rows, negligible size) joined at query time instead of
+repeating the string in every one of 510M rows.
 
-`abstract_inverted_index` is deliberately excluded (not in the recommended field list) — it is very likely the
-single largest field in the raw record and has no use in Phase 1–3 (graph construction, ranking). Defer
-extracting it, if ever needed for Phase 4 text retrieval, to a separate pass over only the subset of works kept
-in the graph.
+`abstract_inverted_index` **is now kept** in the compact schema (decision reversed as of 2026-07-15) — deliberate
+tradeoff to avoid re-touching the raw 725GB snapshot later for Phase 4 keyword/semantic search, at the cost of
+extra compact-dataset size now. The 45GB figure above does **not** include it and is stale; a quick (non-representative,
+~2x-denser-than-average sample) check measured a **+399 bytes/record** delta with the field included, on a sample
+where **50.4%** of records had a null abstract. Re-measurement against a properly representative sample (same
+method as above: broad date-range sample, not just the largest local shards) is still needed before trusting an
+updated total — do that before finalizing the steady-state footprint below.
 
 ### Citation edges / graph footprint (Phase 2 planning)
 
@@ -83,14 +86,15 @@ in the graph.
 
 | Artifact | Size |
 |---|---|
-| `works_compact.parquet` (+ dimension tables) | ~45 GB |
+| `works_compact.parquet` (+ dimension tables) | ~45 GB **(stale, excludes `abstract_inverted_index` — pending re-measurement)** |
 | `raw_citation_edges.parquet` (transient, deletable post-Phase 2) | ~38 GB |
 | CSR graph (forward + reverse, int32) | ~23 GB |
 | ID mapping tables | ~10 GB |
-| **Permanent total (excluding transient edge list)** | **~80-90 GB** |
+| **Permanent total (excluding transient edge list)** | **~80-90 GB, likely higher — see above** |
 
-This leaves large headroom under the 600 GB budget for benchmark datasets, indices, and later-phase artifacts,
-and comfortably fits even in the 164 GB currently free — once the raw snapshot is no longer retained.
+This leaves large headroom under the 600 GB budget for benchmark datasets, indices, and later-phase artifacts.
+Whether it still "comfortably" fits the 164 GB currently free depends on the pending `abstract_inverted_index`
+re-measurement above — don't treat that as settled until the number is updated.
 
 ## Tooling & resources (to research before implementing)
 
@@ -171,3 +175,22 @@ in DuckDB) to merge the many small per-shard compact files into fewer, larger ro
 The extraction pipeline described above should be the primary ingestion path; the REST client, if kept, should
 be scoped to incremental updates/point lookups only, and should read its API key from an environment variable
 rather than any hardcoded value.
+
+## Validation Methodology
+
+Outlines of criterias on how compressed data should be validated before proceeding.
+
+### 1. Entry counts
+- Compute the number of compact entries relative to raw entries (described in manifest.json).
+- Achieved by re-reading each parquet, and compare entry count to the count described in extraction_manifest.json.
+- Additionally, log any corrupted/unreadable parquets.
+
+### 2. Column presence
+- Checking for missing & flag excess columns not described in data_reference.md.
+
+### 4. Work ID/Referenced_works integrity
+- Checking for id uniqueness, duplicate id, etc...
+- Logging any anomalous referenced work (len(referenced_works != referenced_works_count), referenced_work DNE, etc...)
+
+### 3. File size analytics
+- Computing aggregated total compact size & compact size per shard. 
