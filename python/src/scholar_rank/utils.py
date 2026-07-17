@@ -1,6 +1,7 @@
 import logging
 import sys
 
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -22,3 +23,7 @@ def get_logger(name: str) -> logging.Logger:
         logger.addHandler(handler)
     logger.setLevel(logging.INFO) # Set min displayed warning level
     return logger
+
+def get_current_time() -> str:
+    formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z %z")
+    return formatted_time

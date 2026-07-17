@@ -1,19 +1,21 @@
-"""Fetching data from OpenAlex API, and saving it under data/compressed
+"""Shard-by-shard ingestion pipeline for the OpenAlex bulk S3 snapshot (Works entity).
 
-    This module implements a manifest-based shard-by-shard data extraction for
-    all data necessary for this project.
+Streams Works shards from the public S3 snapshot, projects each one down to
+ScholarRank's compact schema via DuckDB, validates the compact output against the
+shard's own declared manifest stats, and deletes the raw shard once validated — so
+the full ~725GB raw snapshot never needs to be held on disk at once. See
+docs/data_pipeline.md for the full design and disk-budget reasoning.
 
-    This includes:
-    - Works
-    - Authors (Delegated)
-    - Sources (Delegated)
-    - Topics (Delegated)
+Entry point: orchestrate(). Raw shards live under data/openalex/, compact output
+under data/compact/. Includes a resumability mechanism (list_local_and_remote_shards)
+so a re-run doesn't re-fetch/re-extract shards a prior run already finished.
 
-    Data is expected to be saved inside ./data folder.
-
-    This module also includes a resumation mechanism in cases part of the full database
-    is already present on local machine. 
-
+Current scope: Works only. Functions/constants below are pre-marked
+"Abstract"/"Concrete" to flag which pieces are entity-specific vs. shared, ahead of a
+planned refactor into an EntityIngestor base class supporting Authors/Sources/Topics —
+see "Multi-entity architecture (deferred)" in docs/data_pipeline.md. That refactor
+has not happened yet; the abstract/concrete split is documentation of intent, not an
+enforced interface (no ABC, no subclasses yet).
 """
 
 import boto3
@@ -21,13 +23,15 @@ import duckdb
 import json
 import os
 
+from dataclasses import dataclass
 from pathlib import Path
-from scholar_rank.utils import get_logger, PROJECT_ROOT
+from scholar_rank.utils import get_logger, PROJECT_ROOT, get_current_time
 from botocore import UNSIGNED
 from botocore.client import Config
 
 logger = get_logger(__name__)
 
+# Abstract property
 # Columns being extracted from raw shards
 extracted_columns = [
     "id",
@@ -46,6 +50,7 @@ extracted_columns = [
     "topics"
 ]
 
+# Abstract property
 # Columns present in final compact shard
 columns = [
     "id",
@@ -65,79 +70,170 @@ columns = [
     "topics"
 ]
 
+# Inherited properties
+UPSTREAM_PREFIX = Path("data/parquet")
+RAW_PATH = PROJECT_ROOT/"data"/"openalex"
+COMPACT_PATH = PROJECT_ROOT/"data"/"compact"
+
+# Abstract property
 entity = "works"
 
+# Concrete method
 def get_manifest(upstream_path, dest_path: Path) -> None:
-    """Getting manifest.json for an Entity from OpenAlex S3 storage.
+    """Download an entity's manifest.json from the OpenAlex S3 snapshot.
 
-        Args:
-            upstream_path: pathlib.Path to manifest.json location in S3 bucket.
-            dest_path: pathlib.Path to save location for manifest.json.
+    Fetches the upstream manifest (the file listing every shard for this entity, with
+    per-shard record_count/content_length) via anonymous S3 access and writes it to
+    dest_path. Always the first step of orchestrate() — every other function in this
+    module that reads a manifest reads it back from dest_path, not from S3 directly.
 
-        Returns:
-            None
+    Concerns:
+        Does not create dest_path's parent directory — assumes it already exists.
+
+    Args:
+        upstream_path: Key of manifest.json in the 'openalex' S3 bucket.
+        dest_path: Local path to write the downloaded manifest.json to.
+
+    Returns:
+        None
+
+    Raises:
+        botocore.exceptions.ClientError: S3-side failure (missing key, access denied).
+        boto3.exceptions.RetriesExceededError: transient network errors exhausted retries.
+        OSError: local write failure (e.g. dest_path's parent directory missing, disk
+            full) — unwrapped, since the underlying write is a bare open().
+        All of the above are logged as a warning here, then re-raised to the caller.
     """
 
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
     try:
-        s3.download_file('openalex',upstream_path, dest_path)
+        s3.download_file('openalex',str(upstream_path), str(dest_path))
     except Exception as e:
         logger.warning(f"Failed to fetch {upstream_path}.")
         raise
 
     logger.info(f"Fetched {upstream_path} successfully.")
 
-def list_local_and_remote_shards(manifest_path: Path, raw_data_path: Path)->(list,list):
-    """Listing all shards present and not present in raw data path for an Entity.
+# Concrete method
+@dataclass(kw_only=True)
+class ManifestData:
+    """One entry from an entity's manifest.json — S3 key plus the raw shard's declared stats.
 
-        raw_data_path should be the parent folder of all entity folders
-        {raw_data_path}
+    key is stripped of the 's3://openalex/data/parquet/' prefix, so it doubles as the
+    relative path fragment used under both RAW_PATH and COMPACT_PATH (e.g.
+    'works/updated_date=2016-06-24/part_0000.parquet'). content_length/record_count are
+    OpenAlex's own declared values for the *raw* shard — used as ground truth by
+    get_shard_validation_result rather than re-measured from the raw file.
+    """
+    key: Path               # Key (directory) of a file on S3
+    content_length: int     # File size
+    record_count: int       # No of records in shard
+
+# Concrete method
+def get_manifest_data(manifest_path: Path) -> list:
+    """Parse a local manifest.json into a list of ManifestData.
+
+    Strips the 's3://openalex/data/parquet/' prefix from each file's url, leaving a
+    key relative to the bucket root that doubles as the local path fragment under both
+    RAW_PATH and COMPACT_PATH — useful both for fetching with boto3 and as a local
+    file-directory lookup.
+
+    Concerns:
+        Hardcodes manifest.json's structure (top-level "files" list, each with
+        "url"/"meta.content_length"/"meta.record_count") — will raise KeyError if
+        OpenAlex changes this shape. Keep in mind for future maintenance.
+
+    Args:
+        manifest_path: Path to a locally downloaded manifest.json.
+
+    Returns:
+        A list of ManifestData, one per shard listed in the manifest.
+
+    Raises:
+        FileNotFoundError: manifest_path doesn't exist.
+        json.JSONDecodeError: manifest_path isn't valid JSON.
+        KeyError: an entry is missing the expected "url"/"meta" fields.
+        FileNotFoundError/JSONDecodeError are logged as a warning here, then re-raised.
+    """
+
+    manifest_data = None
+    try:
+        with open(manifest_path, 'r') as f:
+            manifest_data = json.load(f)
+    except Exception as e:
+        logger.warning(f"Unable to open manifest.json: {e}")
+        raise
+
+    # Getting all files metadata in manifest.json, and stripping s3 prefix.
+    lst = [ManifestData(
+        key = Path(obj["url"].replace('s3://openalex/data/parquet/', '')),
+        content_length = obj['meta']['content_length'],
+        record_count = obj['meta']['record_count']
+    ) for obj in manifest_data["files"]]
+
+    return lst
+
+# Concrete method
+def list_local_and_remote_shards(manifest_path: Path, raw_path: Path)->(list,list):
+    """Split an entity's manifest entries into what's already downloaded vs. not.
+
+    Checks, for every ManifestData in the manifest, whether raw_path/key exists as a
+    local file. This is the resumability mechanism referenced in the module docstring —
+    orchestrate() uses this split to skip re-fetching shards across runs.
+
+        raw_path should be the parent folder of all entity folders:
+        {raw_path}
             /works
             /authors
             /sources
 
-        Args:
-            manifest_path: pathlib.Path to manifest.json locally
-            raw_data_path: pathlib.Path to raw data directory corresponding to manifest.json
+    Args:
+        manifest_path: pathlib.Path to manifest.json locally.
+        raw_path: pathlib.Path to the raw data directory corresponding to manifest_path.
 
-        Returns:
-            List of Paths of local and remote shards, or empty list if exception occured
+    Returns:
+        (local_shard_list, remote_shard_list) — two lists of ManifestData.
 
+    Raises:
+        Propagates whatever get_manifest_data raises (FileNotFoundError,
+        json.JSONDecodeError, KeyError).
     """
 
-    data = None
+    data = get_manifest_data(manifest_path)
 
-    try:
-        with open(manifest_path,'r') as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.warning(f"Unable to open manifest.json: {e}")
-        raise
-    
     remote_shard_list = []
     local_shard_list = []
 
-    for obj in data["files"]:
+    for obj in data:
         # Extracting only the directory of a shard (Hardcoded, subject to edits)
-        url = obj["url"].replace('s3://openalex/data/parquet/', '').replace('s3://openalex/data/jsonl/', '')
-        if (not Path(raw_data_path/url).is_file()):
-            remote_shard_list.append(url)
+        if (not Path(raw_path/obj.key).is_file()):
+            remote_shard_list.append(obj)
         else:
-            local_shard_list.append(url)
+            local_shard_list.append(obj)
         
     return (local_shard_list,remote_shard_list)
 
-
+# Concrete method
 def fetch_shard(upstream_path, dest_path: Path) -> None:
-    """Fetching remote parquet files from S3 and save to dest
+    """Download a single raw shard from the OpenAlex S3 snapshot.
+
+    Concerns:
+        Does not create dest_path's parent directory — orchestrate() relies on
+        RAW_PATH/entity/... already existing from a prior download.
 
     Args:
-        upstream_path: Path of shard on S3 storage
-        dest_path: Path where remote shard is saved on local device.
+        upstream_path: Key of the shard on S3 (ManifestData.key).
+        dest_path: Local path to save the shard to.
 
     Returns:
         None
 
+    Raises:
+        botocore.exceptions.ClientError: S3-side failure.
+        boto3.exceptions.RetriesExceededError: transient network errors exhausted retries.
+        OSError: local write failure (e.g. dest_path's parent directory missing, disk
+            full) — unwrapped, since the underlying write is a bare open().
+        All of the above are logged as a warning here, then re-raised to the caller.
     """
 
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
@@ -149,38 +245,63 @@ def fetch_shard(upstream_path, dest_path: Path) -> None:
     
     logger.info(f"Fetched {upstream_path} successfully.")
 
+# Concrete method
 def show_shard(shard_path: Path):
+    """Debug helper: print a shard's contents to stdout via DuckDB's relation display.
+
+    Not part of the orchestrated pipeline — used for ad-hoc inspection during
+    development (e.g. from a notebook).
+
+    Args:
+        shard_path: Path to any parquet file, raw or compact.
+
+    Returns:
+        None
+
+    Raises:
+        Propagates any DuckDB error unhandled (e.g. shard_path doesn't exist or isn't
+        valid parquet) — no try/except here.
+    """
     db = duckdb.connect();
     rel = db.read_parquet(shard_path)
 
     rel.show()
 
-def extract_compact(shard_path, out_path, url: Path) -> dict:
-    """Extract code metadata from each shard
+# Abstract method
+def extract_compact(shard_path, out_path: Path):
+    """Project one raw Works shard down to ScholarRank's compact schema via DuckDB.
 
-    Details of metadata explained in data_reference.md
+    Reads shard_path, strips the 'https://openalex.org/'/'https://doi.org/' prefixes
+    from every embedded ID, truncates authorships to the first two plus the last
+    (flagging authorships_truncated when the original list had more than 3), reshapes
+    topics to keep id/display_name/score plus the subfield/field/domain hierarchy, and
+    writes the result to out_path as Parquet+zstd. Full compact column list: see the
+    module-level `columns` constant. Field-level details: data_reference.md.
 
-    Outstanding issues:
-        authorships_truncated condition check is positioned after the actual
-        authorships truncation. Need to confirm if this has 100% false rate.
+    Verified (2026-07-16, against a real shard where 106/2439 works had >3 authors):
+        authorships_truncated correctly reads true for exactly those 106 rows.
+        DuckDB's `* REPLACE(...)` scoping resolves the trailing authorships_truncated
+        expression against the original (pre-truncation) authorships column, not the
+        already-replaced one, despite both appearing in the same SELECT list. Previously
+        flagged here as an open question ("need to confirm if this has 100% false
+        rate") — confirmed correct, not a bug.
+
+    Concerns:
+        No validation happens here — this function always writes output regardless of
+        whether the projection is actually correct; correctness is checked separately,
+        after the fact, by get_shard_validation_result / validate_compact_shard.
 
     Args:
         shard_path: Local shard path for extraction.
-        out_path: Output file path after extracting metadata.
-        url: The key on Amazon S3. Used to append to metadata.
+        out_path: Output file path after extracting metadata (parent directories are
+            created if missing).
 
     Returns:
-        A dictionary with following structure:
+        None
 
-        {
-            'url': Path,
-            'meta': {
-                'content_length': int
-                'record_count': int
-            }
-        }
-
-        This structure is reflective of that in 
+    Raises:
+        Propagates any DuckDB error unhandled (e.g. malformed/unexpected raw schema,
+        disk full during the final COPY) — no try/except here.
     """
 
     db = duckdb.connect()
@@ -241,68 +362,15 @@ def extract_compact(shard_path, out_path, url: Path) -> dict:
         (FORMAT parquet, COMPRESSION zstd)
     """)
 
-    files_data = {
-        'url': url,
-        'meta': {
-            'content_length': os.path.getsize(out_path)
-            'record_count': record_count
-        }
-    }
-
-    return files_data
-
-class ManifestData:
-    key: Path               # Key (directory) of a file on S3 
-    content_length: int     # File size
-    record_count: int       # No of records in shard
-
-    def __init__(
-        self,
-        key,
-        content_length,
-        record_count
-    ):
-        self.key = key
-        self.content_length = content_length
-        self.record_count = record_count
-
-def get_manifest_data(manifest_path: Path) -> list:
-    """Getting all files metadata from manifest.json.
-
-    This method strips away 's3://...' prefix for url in each files,
-    Leaving only the path relative to root (key) of S3 bucket.
-
-    This is useful for both fetching files with boto3 or act as file directory
-    for local saves.
-
-    This method hardcoded the structure of manifest.json fetched from S3.
-    Keep that in mind for future maintainence.
-
-    Args:
-        manifest_path: Path to the desired manifest.json
-
-    Returns:
-        A list of ManifestData 
-
-    """
-    try:
-        with open(manifest_path, 'r') as f:
-            manifest_data = json.load(f)
-    except Exception as e:
-        logger.warning(f"Unable to open manifest.json: {e}")
-        raise
-
-    # Getting all files metadata in manifest.json, and stripping s3 prefix.
-    lst = [ManifestData(
-        Path(obj["url"].replace('s3://openalex/data/parquet/', '')),
-        obj['meta']['content_length'],
-        obj['meta']['record_count']
-    ) for obj in data["files"]]
-
-    return lst
-
-@dataclass
+# Local helper
+@dataclass(kw_only=True)
 class ShardValidationResult:
+    """Raw-vs-compact stats for one shard, for validate_compact_shard to interpret.
+
+    raw_* fields come from the manifest (OpenAlex's own declared values); the rest is
+    measured directly against the compact output on disk by get_shard_validation_result.
+    This class only holds data — pass/fail interpretation lives in validate_compact_shard.
+    """
     raw_content_length: int
     compact_content_length: int
     raw_record_count: int
@@ -312,43 +380,33 @@ class ShardValidationResult:
     missing_columns: list[str]
     redundant_columns: list[str]
 
-    def __init__(
-        self,
-        raw_content_length,
-        compact_content_length,
-        raw_record_count,
-        compact_record_count,
-        link_mismatch_count,
-        is_valid_schema,
-        missing_columns,
-        redundant_columns
-    ):
-        self.raw_content_length = raw_content_length
-        self.compact_content_length = compact_content_length
-        self.raw_record_count = raw_record_count
-        self.compact_record_count = compact_record_count
-        self.link_mismatch_count = link_mismatch_count
-        self.is_valid_schema = is_valid_schema
-        self.missing_columns = missing_columns
-        self.redundant_columns = redundant_columns
+# Local helper
+def get_shard_validation_result(shard_path: Path, content_length, record_count: int):
+    """Measure one compact shard's stats and package them into a ShardValidationResult.
 
-def validate_compact_shard(shard_path: Path, content_length, record_count: int):
-    """Validate data on a per-shard basis
+    Computes: compact row count, compact file size, count of rows where
+    referenced_works_count disagrees with len(referenced_works) (NULL counts as a
+    mismatch), and the compact schema's column set vs. the expected `columns` list.
+    Does not decide pass/fail itself — that's validate_compact_shard's job, working
+    from the result this returns.
 
-    This check should handle these following conditions
-    - Validate compact entry count relative to raw entry counts
-    - Check for schema integrity (missing/redundant columns)
-    - Check referenced_works size matches that of referenced_works_count (Important check)
-    - Compute reduction in file size
+    Concerns:
+        No check yet for the file-size-ratio sanity signal described in
+        docs/data_pipeline.md's validation methodology (raw vs. compact byte ratio) —
+        raw_content_length/compact_content_length are captured here but not compared
+        against each other or against the expected ~6-9% ratio.
 
     Args:
-        shard_path: Path to shard being validated
-        content_length: File size of raw file (embedded in manifest.json)
-        record_count: Record count of raw file (embedded in manifest.json)
+        shard_path: Path to the compact shard being validated.
+        content_length: Declared raw file size, from the shard's manifest entry.
+        record_count: Declared raw record count, from the shard's manifest entry.
 
     Returns:
-        A ShardValidationResult object describing validation result.
+        A ShardValidationResult.
 
+    Raises:
+        Propagates any DuckDB error (e.g. shard_path isn't valid parquet) or OSError
+        from os.path.getsize (e.g. shard_path doesn't exist) — no try/except here.
     """
     
     db = duckdb.connect()
@@ -369,42 +427,63 @@ def validate_compact_shard(shard_path: Path, content_length, record_count: int):
     redundant_columns = [c for c in cols if c not in expected_columns]
 
     res = ShardValidationResult(
-        content_length,
-        compact_content_length,
-        record_count,
-        compact_record_count,
-        link_mismatch_count,
-        (len(missing_columns) == 0 and len(redundant_columns) == 0),
-        missing_columns,
-        redundant_columns,
+        raw_content_length = content_length,
+        compact_content_length = compact_content_length,
+        raw_record_count = record_count,
+        compact_record_count = compact_record_count,
+        link_mismatch_count = link_mismatch_count,
+        is_valid_schema = (len(missing_columns) == 0 and len(redundant_columns) == 0),
+        missing_columns = missing_columns,
+        redundant_columns = redundant_columns,
     )
 
     return res
 
+# Abstract method
 def validate_compact_data(manifest_path, compact_path: Path):
-    """Validate the extracted shards as outlined in data_pipeline.md
+    """Full-corpus audit across every compact shard currently on disk for this entity.
 
-    compact_path should be the parent folder of all entity folders
-    {compact_path}
-        /works
-        /authors
-        /sources
+    Unlike get_shard_validation_result (one shard, called per-shard inline in
+    orchestrate), this runs the checks that can only be computed with every shard
+    present at once: work_id uniqueness and referenced_works dangling-reference /
+    duplicate-link detection, both via DuckDB anti-joins over the whole compact_path
+    directory. Also rebuilds compact_manifest.json (a manifest.json-shaped mirror of
+    the compact dataset) from scratch each run, rather than maintaining it incrementally.
 
-    Main validation checks are:
-    - Work ID uniqueness
-    - referenced_works integrity (referenced_works id exist, no duplicate links. etc.)
-    - Compute file size for each shard, and compute total file size
+        compact_path should be the parent folder of all entity folders:
+        {compact_path}
+            /works
+            /authors
+            /sources
 
     This function produces two files:
-    - {compact_path}/{entity}/integrity_report.txt: Validation report across all shards
+    - {compact_path}/{entity}/integrity_report.txt: validation report across all shards.
     - {compact_path}/{entity}/compact_manifest.json: manifest.json mirror for compact shards.
 
+    Concerns:
+        - Meaningful only once every shard you intend to keep is actually present —
+          run mid-backfill, it reports shards that simply haven't been processed yet as
+          though they were corpus gaps.
+        - Does not create compact_path/entity/ before writing its two output files —
+          assumes it already exists from prior extract_compact calls (true in the
+          current orchestrate() flow; not guaranteed if called standalone before any
+          shard has been extracted).
+        - A nonzero dangling-reference count is expected, not necessarily a bug —
+          OpenAlex references can legitimately point to merged/deprecated/out-of-scope
+          works (see initialization.md's Phase 2 validation goals).
+
     Args:
-        manifest_path: Path to manifest.json for raw data.
-        compact_path: Path to extracted parquet shards
+        manifest_path: Path to the entity's locally downloaded manifest.json — source
+            of truth for which raw shards exist and their declared stats.
+        compact_path: Root directory of compact output (COMPACT_PATH).
 
     Returns:
-        None
+        None. Writes the two files described above as a side effect; also prints a
+        summary to stdout.
+
+    Raises:
+        Propagates any DuckDB error, or OSError from os.path.getsize / the two output
+        file writes (e.g. compact_path/entity/ doesn't exist) — no try/except here.
     """
 
     files = get_manifest_data(manifest_path)
@@ -471,7 +550,7 @@ def validate_compact_data(manifest_path, compact_path: Path):
         ) w
         ANTI JOIN all_ids a ON a.id = w.ref
         ORDER BY work_id
-    """, [shard_paths]).fetchall()
+    """, params=[shard_paths]).fetchall()
 
     # __ CHECK 2b: duplicate links within a record ________________________________
     # List of work ids that contain at least one repeated reference.
@@ -480,7 +559,7 @@ def validate_compact_data(manifest_path, compact_path: Path):
         FROM read_parquet(?)
         WHERE len(referenced_works) <> len(list_distinct(referenced_works))
         ORDER BY work_id
-    """, [shard_paths]).fetchall()
+    """, params=[shard_paths]).fetchall()
 
     # Detail: which reference was repeated, and how many times, per work.
     dup_link_detail = con.sql(f"""
@@ -492,7 +571,7 @@ def validate_compact_data(manifest_path, compact_path: Path):
         GROUP BY id, ref
         HAVING count(*) > 1
         ORDER BY work_id, occurrences DESC
-    """, [shard_paths]).fetchall()
+    """, params=[shard_paths]).fetchall()
 
     # __ REPORT _________________________________________________________________
     print(f"Shards:               {len(compact_shard_paths)}")
@@ -528,16 +607,274 @@ def validate_compact_data(manifest_path, compact_path: Path):
     with open(compact_path/entity/"compact_manifest.json", "w") as f:
         json.dump(compact_manifest, f)
 
+# Concrete method
+def delete_shard(shard_path: Path) -> None:
+    """Delete a shard file (raw or compact) to reclaim disk space.
 
-def delete_raw(shard_path: Path) -> None:
-    """Delete raw data shard to preserve space
+    In orchestrate(), only ever called on a raw shard, and only after that shard's
+    compact output has passed validate_compact_shard with zero errors — this is the
+    one irreversible step in the pipeline (raw shards are not retained, per
+    docs/initialization.md's Phase 1 anti-pattern warning). Callers must not call this
+    before validation has actually passed.
 
     Args:
-        shard_path: Path to the shard to be deleted
+        shard_path: Path to the shard to delete.
 
     Returns:
         None
 
+    Raises:
+        missing_ok=True means a missing file is silently a no-op, not an error.
+        Other OSError (e.g. permission denied) still propagates.
     """
 
     shard_path.unlink(missing_ok=True)
+
+# Concrete method
+def init_extraction_log(extraction_log_path: Path) -> None:
+    """Create (or overwrite) the per-run extraction log with a timestamp header.
+
+    Called once at the start of orchestrate(), before any shard is processed — resets
+    the log to record only the current orchestration pass's errors, not history from
+    prior runs. See append_extraction_log for the per-shard entries written into it.
+
+    Concerns:
+        Overwriting on every orchestrate() call means log history from a previous
+        (possibly incomplete) run is lost the moment the next run starts — intentional
+        (this log is "this run's errors", not a durable cross-run audit trail), not an
+        oversight, but worth knowing if you're trying to review a past failed run.
+        Assumes extraction_log_path's parent directory already exists — will raise on
+        a truly first-ever run, before any shard has gone through extract_compact's
+        own mkdir call, since nothing else creates compact_path/entity/ first.
+
+    Args:
+        extraction_log_path: Path to the log file to create/overwrite.
+
+    Returns:
+        None
+
+    Raises:
+        OSError (e.g. FileNotFoundError if the parent directory doesn't exist) —
+        logged as a warning here, then re-raised.
+    """
+    try:
+        with open(extraction_log_path, "w", encoding="utf-8") as f:
+            f.write(f"Time created: {get_current_time()}\n")
+    except Exception as e:
+        logger.warning(f"Failed to open extraction_log.txt: {e}")
+        raise
+
+# Concrete method
+def append_extraction_log(extraction_log_path: Path, message: str) -> None:
+    """Append one message to the extraction log, without touching existing content.
+
+    Args:
+        extraction_log_path: Path to the log file (must already exist —
+            see init_extraction_log).
+        message: Text to append; a trailing newline is added automatically.
+
+    Returns:
+        None
+
+    Raises:
+        OSError (e.g. FileNotFoundError if extraction_log_path doesn't exist) —
+        logged as a warning here, then re-raised.
+    """
+    try:
+        with open(extraction_log_path, "a", encoding="utf-8") as f:
+            f.write(f"{message}\n")
+    except Exception as e:
+        logger.warning(f"Failed to open extraction_log.txt: {e}")
+        raise
+
+# Abstract method
+def validate_compact_shard(file: ManifestData) -> list[str]:
+    """Run get_shard_validation_result for one shard and turn it into pass/fail errors.
+
+    The three checks — record count parity, referenced_works length integrity, schema
+    match — are independent; any one failing appends a human-readable message to the
+    returned list rather than stopping early, so a single shard's log entry can report
+    every problem found, not just the first one hit.
+
+    Concerns:
+        Only covers 3 of the 4 checks named in docs/data_pipeline.md's validation
+        methodology — the file-size-ratio check isn't included here, so it currently
+        can't fail a shard (matches the earlier design decision to treat size ratio as
+        an informational signal rather than a blocking one).
+
+    Args:
+        file: The ManifestData entry for the shard to validate (its .key locates the
+            already-extracted compact file under COMPACT_PATH).
+
+    Returns:
+        A list of error message strings — empty if the shard passed every check.
+        Callers should treat an empty list as the pass signal (orchestrate() checks
+        len(errors) == 0).
+
+    Raises:
+        Propagates whatever get_shard_validation_result raises (DuckDB errors, OSError
+        from a missing compact file) — no try/except here.
+    """
+    val_result = get_shard_validation_result(
+        COMPACT_PATH/file.key,
+        file.content_length,
+        file.record_count
+    )
+    
+    errors = []
+
+    if val_result.raw_record_count != val_result.compact_record_count:
+        message = f"""
+            Shard {file.key} - Mismatched record_count detected. 
+            raw_record_count is {val_result.raw_record_count}, 
+            compact_record_count is {val_result.compact_record_count}.
+        """
+        errors.append(message)
+    
+    if val_result.link_mismatch_count != 0:
+        message = f"""
+            Shard {file.key} - Mismatched referenced_work length detected 
+            (Count: {val_result.link_mismatch_count}).
+        """
+        errors.append(message)
+
+    if not val_result.is_valid_schema:
+        message = f"""
+            Shard {file.key} - Mismatched schema detected. 
+            missing_columns: {val_result.missing_columns};  
+            redundant_columns: {val_result.redundant_columns}.
+        """
+        errors.append(message)
+    
+    return errors
+
+# Concrete method
+def orchestrate():
+    """Run one full Works ingestion pass: fetch, extract, validate, delete, per shard.
+
+    Downloads the manifest, splits shards into already-local vs. remote (resumability),
+    then for every shard: extract -> validate -> either delete the raw copy (validation
+    passed) or log the failure and keep the raw copy (validation failed, so nothing
+    unsafe is ever deleted). Remote shards whose compact output already exists are
+    skipped entirely, on the assumption a prior run already validated them (see
+    Concerns). Once every shard's per-shard checks are done, runs validate_compact_data
+    as a final full-corpus audit — but only if invalid_shard_count is 0, since a
+    dangling-reference/uniqueness sweep isn't very meaningful over a dataset already
+    known to have per-shard problems.
+
+    Escalation: if invalid_shard_count reaches invalid_shard_limit (50), raises
+    RuntimeError immediately rather than continuing — bounds how much raw data can pile
+    up undeleted (the actual motivating constraint, given the project's disk budget),
+    and incidentally also bounds how long a systemic extraction bug could run before
+    someone notices.
+
+    Concerns:
+        - The remote_shards skip check (raw absent + compact present => treat as
+          already validated) assumes every existing compact file was produced by this
+          validated pipeline. Any compact file written by an earlier, ungated process
+          (e.g. a manual notebook cell calling extract_compact directly) would be
+          silently trusted here without ever having actually passed validation.
+        - invalid_shard_count is cumulative across the whole run, not consecutive — 50
+          failures scattered across ~1857 shards reads very differently from 50 in a
+          row (the latter being a much stronger signal of a systemic bug), but both
+          hit the same threshold identically.
+        - Entity-specific throughout (hardcoded to the module-level entity="works"
+          constant) — see the "Abstract"/"Concrete" markers and
+          docs/data_pipeline.md's deferred multi-entity refactor note.
+
+    Args:
+        None. Reads module-level constants: entity, UPSTREAM_PREFIX, RAW_PATH,
+        COMPACT_PATH.
+
+    Returns:
+        None. Side effects: downloads/deletes files under RAW_PATH, writes files under
+        COMPACT_PATH (extraction_log.txt always; integrity_report.txt and
+        compact_manifest.json only on a fully clean run, via validate_compact_data).
+
+    Raises:
+        RuntimeError: invalid_shard_count reached invalid_shard_limit.
+        Propagates any other unhandled exception from get_manifest, fetch_shard,
+        extract_compact, or the validation chain — intentional: an unexpected
+        exception here should halt the run loudly rather than be silently swallowed.
+        Only the validation-failure path is deliberately handled as skip-and-continue.
+    """
+    upstream_manifest_path = UPSTREAM_PREFIX/entity/"manifest.json"
+    manifest_path = RAW_PATH/entity/"manifest.json"
+    get_manifest(upstream_manifest_path, manifest_path)
+
+    local_shards, remote_shards = list_local_and_remote_shards(manifest_path, RAW_PATH)
+
+    extraction_log_path = COMPACT_PATH/entity/"extraction_log.txt"
+    
+    # Setting a limit for how many invalid shards before raising exception.
+    invalid_shard_limit = 50
+    invalid_shard_count = 0
+
+    init_extraction_log(extraction_log_path)
+
+    logger.info(f"Initiating shard extraction for entity {entity}")
+
+    for file in local_shards:
+        logger.info(f"Current shard: {file.key} [local].")
+        logger.info(f"Extracting shard {file.key}...")
+
+        extract_compact(RAW_PATH/file.key, COMPACT_PATH/file.key)
+        logger.info(f"Extracted shard {file.key} successsfully, validating shard...")
+
+        errors = validate_compact_shard(file)
+
+        if len(errors) != 0:
+            invalid_shard_count += 1
+            for error in errors:
+                logger.warning(error)
+                append_extraction_log(extraction_log_path, error)
+        else:
+            delete_shard(RAW_PATH/file.key)
+            logger.info(f"Validated shard {file.key} successfully: No errors found.")
+        
+        if invalid_shard_count >= invalid_shard_limit:
+            logger.warning(f"Invalid shard count exceeded limit {invalid_shard_limit}, raising...")
+            raise RuntimeError(f"Invalid shard limit exceeded (limit: {invalid_shard_limit}).")
+
+    for file in remote_shards:
+        # Raw files not on local & compact file exist implies shard passed validation check.
+        if (Path(COMPACT_PATH/file.key).is_file()):
+            continue
+
+        logger.info(f"Current shard: {file.key} [remote].")
+        logger.info(f"Fetching shard {file.key}...")
+
+        fetch_shard(file.key, RAW_PATH/file.key)
+        logger.info(f"Fetched shard {file.key} successfully, extracting shard...")
+
+        extract_compact(RAW_PATH/file.key, COMPACT_PATH/file.key)
+        logger.info(f"Extracted shard {file.key} successsfully, validating shard...")
+
+        errors = validate_compact_shard(file)
+
+        if len(errors) != 0:
+            invalid_shard_count += 1
+            for error in errors:
+                logger.warning(error)
+                append_extraction_log(extraction_log_path, error)
+        else:
+            delete_shard(RAW_PATH/file.key)
+            logger.info(f"Validated shard {file.key} successfully: No errors found.")
+        
+        if invalid_shard_count >= invalid_shard_limit:
+            logger.warning(f"Invalid shard count exceeded limit {invalid_shard_limit}, raising...")
+            raise RuntimeError(f"Invalid shard limit exceeded (limit: {invalid_shard_limit}).")
+
+    if invalid_shard_count != 0:
+        logger.info(f"""
+            Orchestration completed - localized shard errors detected 
+            (invalid shards: {invalid_shard_count})").\n
+            Please navigate to {extraction_log_path} for more details. 
+        """)
+        return
+
+    validate_compact_data(manifest_path, COMPACT_PATH)
+    logger.info(f"""
+        Orchestration completed - no localized shard errors.\n 
+        Please navigate to {COMPACT_PATH/entity/"integrity_report.txt"} for comprehensive analysis.
+    """)
