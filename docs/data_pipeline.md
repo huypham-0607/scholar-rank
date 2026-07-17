@@ -194,3 +194,33 @@ Outlines of criterias on how compressed data should be validated before proceedi
 
 ### 3. File size analytics
 - Computing aggregated total compact size & compact size per shard. 
+
+## Multi-entity architecture (deferred)
+
+Everything above is written Works-specific (`fetch_data.py`'s module-level `columns`, `extract_compact`'s
+struct-reshaping SQL, the `validate_compact_shard`/`validate_compact_data` split). The module's own docstring
+already scopes this ingestion pipeline to four entities — Works, Authors, Sources, Topics — each with its own
+manifest.json, S3 prefix, raw schema, and compact schema.
+
+**Decision: finish the Works pipeline end-to-end first (fetch → extract → validate → delete, running clean over
+the local backfill) before refactoring for multi-entity support.** Not deferred out of laziness — until the
+Works path actually runs, it's premature to lock in an abstraction boundary for behavior that hasn't been
+exercised yet.
+
+**Proposed shape when the refactor happens** (captured now so the reasoning isn't lost):
+
+- Split by what varies **as data** vs what varies **as logic**. `COLUMNS`, S3 prefix, entity name are just
+  data — class-level constants. `extract_compact`'s reshaping and the validation checks are genuinely different
+  *code* per entity (an Author's nested structure shares nothing with a Work's) — these need to be overridden
+  methods, not parameterized templates.
+- One `EntityIngestor` base class (likely `abc.ABC` + `@abstractmethod`, so a new entity type can't silently
+  forget to implement `extract_compact`/`validate_compact_shard`/`validate_compact_data`) holding the genuinely
+  shared, concrete methods: `get_manifest`, `list_local_and_remote_shards`, `fetch_shard`, `delete_raw` — none
+  of these care what entity they're moving bytes for.
+- `WorksIngestor(EntityIngestor)`, `AuthorsIngestor(EntityIngestor)`, etc. as subclasses supplying the
+  entity-specific constants + the three abstract methods.
+- Open question to resolve at refactor time, not now: does this buy a single shared, polymorphic pipeline-runner
+  function (`for ingestor in [WorksIngestor(), AuthorsIngestor(), ...]: run_pipeline(ingestor)`) — which is the
+  real justification for the inheritance machinery — or would plain functions + a per-entity config object get
+  the same "shared vs specific" separation more simply? Worth answering with the Works implementation already
+  in hand as a concrete reference point, rather than guessing now.

@@ -1,0 +1,7 @@
+Total entries: 342380852.
+Columns labels:
+['id', 'doi', 'title', 'authorships', 'abstract_inverted_index', 'type', 'language', 'primary_location', 'publication_year', 'publication_date', 'referenced_works', 'referenced_works_count', 'cited_by_count', 'topics']
+Raw NULL count by column:
+{'id': 0, 'doi': 166124673, 'title': 1591591, 'authorships': 0, 'abstract_inverted_index': 202361893, 'type': 0, 'language': 13424367, 'primary_location': 0, 'publication_year': 25867542, 'publication_date': 25867542, 'referenced_works': 0, 'referenced_works_count': 0, 'cited_by_count': 0, 'topics': 0}
+Percent NULL by column
+{'id': 0.0, 'doi': 0.4852043332142885, 'title': 0.004648598164011812, 'authorships': 0.0, 'abstract_inverted_index': 0.5910432543698443, 'type': 0.0, 'language': 0.039208871996147726, 'primary_location': 0.0, 'publication_year': 0.07555195288783265, 'publication_date': 0.07555195288783265, 'referenced_works': 0.0, 'referenced_works_count': 0.0, 'cited_by_count': 0.0, 'topics': 0.0}
