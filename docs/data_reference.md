@@ -22,6 +22,8 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | `referenced_works_count`  | `int`         | The number of works that this work cites.                         |
 | `cited_by_count`          | `int`         | The number of citations to this work.                             |
 | `topics`                  | `topic[]`     | The top ranked Topic for this work, with id, display_name, score. |
+| `keywords`                | `keyword[]`   | The top ranked Keyword for this work, with its metadata         |
+
 
 ## All fields for "author"
 
@@ -52,3 +54,11 @@ Sources are taken from [OpenAlex API](https://developers.openalex.org/)
 | `field_display_name`      | `string`      | OpenAlex ID for field.                                         |
 | `domain_id`               | `string`      | OpenAlex score for domain.                                        |
 | `domain_display_name`     | `string`      | OpenAlex score for domain.                                        |
+
+## All fields for "keyword"
+
+| Field name                | Type          | Desc                                                              |
+| ------------------------- | ------------- | ------------------------------------------------------------------|
+| `id`                      | `string`      | OpenAlex ID id for this keyword.                                    |
+| `display_name`            | `string`      | Name of the keyword.                                                |
+| `score`                   | `int`         | OpenAlex score for keyword relevance.                               |

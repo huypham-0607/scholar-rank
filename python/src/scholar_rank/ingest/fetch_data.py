@@ -47,7 +47,8 @@ extracted_columns = [
     "referenced_works",
     "referenced_works_count",
     "cited_by_count",
-    "topics"
+    "topics",
+    "keywords"
 ]
 
 # Abstract property
@@ -67,7 +68,8 @@ columns = [
     "referenced_works",
     "referenced_works_count",
     "cited_by_count",
-    "topics"
+    "topics",
+    "keywords"
 ]
 
 # Inherited properties
@@ -236,14 +238,13 @@ def fetch_shard(upstream_path, dest_path: Path) -> None:
         All of the above are logged as a warning here, then re-raised to the caller.
     """
 
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
     try:
         s3.download_file('openalex',str(upstream_path), str(dest_path))
     except Exception as e:
         logger.warning(f"Failed to fetch {upstream_path}.")
         raise
-    
-    logger.info(f"Fetched {upstream_path} successfully.")
 
 # Concrete method
 def show_shard(shard_path: Path):
@@ -495,7 +496,6 @@ def validate_compact_data(manifest_path, compact_path: Path):
     con = duckdb.connect()
 
     # __ PASS 1: collect all ids (needed before any reference check) _____________
-    con.execute("CREATE TABLE all_ids (id VARCHAR)")
 
     compact_manifest = {
         "format": "parquet",
@@ -514,11 +514,8 @@ def validate_compact_data(manifest_path, compact_path: Path):
         ).fetchone()[0]
         size = os.path.getsize(p)
 
-        # Appending work_ids to all_ids
-        con.execute("INSERT INTO all_ids SELECT id FROM read_parquet(?)", [p])
-
         compact_manifest["files"].append({
-            "key": Path(p).relative_to(compact_path),
+            "key": str(Path(p).relative_to(compact_path)),
             "meta": {
                 "content_length": size,
                 "record_count": record_count
@@ -528,56 +525,59 @@ def validate_compact_data(manifest_path, compact_path: Path):
         compact_manifest["content_length"] += size 
         total_bytes += size
 
-    con.execute("CREATE INDEX idx_all_ids ON all_ids(id)")
-
     shard_paths = [str(p) for p in compact_shard_paths]
 
     # __ CHECK 1: Work ID uniqueness — list of (id, occurrences) __________________
+    logger.info("Validating Work ID uniqueness...")
     duplicate_ids = con.sql("""
         SELECT id, count(*) AS n
-        FROM all_ids
+        FROM read_parquet(?)
         GROUP BY id
         HAVING count(*) > 1
-        ORDER BY n DESC
-    """).fetchall()
+    """, params=[shard_paths]).fetchall()
 
     # __ CHECK 2a: dangling references — list of (work_id, referenced_work_id) ___
+    logger.info("Computing dangling references...")
     dangling_refs = con.sql(f"""
         SELECT w.id AS work_id, w.ref AS referenced_work_id
         FROM (
             SELECT id, unnest(referenced_works) AS ref
             FROM read_parquet(?)
         ) w
-        ANTI JOIN all_ids a ON a.id = w.ref
-        ORDER BY work_id
-    """, params=[shard_paths]).fetchall()
+        ANTI JOIN read_parquet(?) a ON a.id = w.ref
+    """, params=[shard_paths, shard_paths]).fetchall()
 
     # __ CHECK 2b: duplicate links within a record ________________________________
-    # List of work ids that contain at least one repeated reference.
-    dup_link_works = con.sql(f"""
-        SELECT id AS work_id
-        FROM read_parquet(?)
-        WHERE len(referenced_works) <> len(list_distinct(referenced_works))
-        ORDER BY work_id
-    """, params=[shard_paths]).fetchall()
-
-    # Detail: which reference was repeated, and how many times, per work.
-    dup_link_detail = con.sql(f"""
+    # Two-phase: first find candidate works with an internal duplicate via a cheap
+    # length comparison (no unnest, full corpus scan but no row explosion), then
+    # unnest only those candidates for per-reference detail. Unnesting all ~2.37B
+    # referenced_works entries corpus-wide up front OOMs (verified); this doesn't,
+    # since only works that already have a known duplicate ever get unnested.
+    logger.info("Checking for duplicate links...")
+    dup_link_detail = con.sql("""
+        WITH candidates AS (
+            SELECT id, referenced_works
+            FROM read_parquet(?)
+            WHERE len(referenced_works) <> len(list_distinct(referenced_works))
+        )
         SELECT id AS work_id, ref AS referenced_work_id, count(*) AS occurrences
         FROM (
             SELECT id, unnest(referenced_works) AS ref
-            FROM read_parquet(?)
+            FROM candidates
         )
         GROUP BY id, ref
         HAVING count(*) > 1
         ORDER BY work_id, occurrences DESC
     """, params=[shard_paths]).fetchall()
 
+    # Derived from dup_link_detail, not a second corpus scan.
+    dup_link_works = sorted({work_id for work_id, _, _ in dup_link_detail})
+
     # __ REPORT _________________________________________________________________
     print(f"Shards:               {len(compact_shard_paths)}")
     print(f"Total raw size:       {total_raw_bytes:,} bytes ({total_raw_bytes/1e9:.2f} GB)")
     print(f"Total size:           {total_bytes:,} bytes ({total_bytes/1e9:.2f} GB)")
-    print(f"Size reduction:       {float(total_bytes)/total_raw_bytes:.2f}% of raw size")
+    print(f"Size reduction:       {float(total_bytes)/total_raw_bytes*100:.2f}% of raw size")
     print(f"Duplicate work ids:   {len(duplicate_ids)}")
     print(f"Dangling references:  {len(dangling_refs)}")
     print(f"Works w/ dup links:   {len(dup_link_works)}")
@@ -586,7 +586,7 @@ def validate_compact_data(manifest_path, compact_path: Path):
         f.write(f"Shards: {len(compact_shard_paths)}\n")
         f.write(f"Total raw size: {total_raw_bytes:,} bytes ({total_raw_bytes/1e9:.2f} GB)")
         f.write(f"Total size: {total_bytes:,} bytes ({total_bytes/1e9:.2f} GB)\n\n")
-        f.write(f"Size reduction: {float(total_bytes)/total_raw_bytes:.2f}% of raw size")
+        f.write(f"Size reduction: {float(total_bytes)/total_raw_bytes*100:.2f}% of raw size")
 
         f.write(f"Duplicate work ids ({len(duplicate_ids)}):\n")
         for wid, n in duplicate_ids:
@@ -597,7 +597,7 @@ def validate_compact_data(manifest_path, compact_path: Path):
             f.write(f"  {work_id} -> {ref_id}\n")
 
         f.write(f"\nWorks with duplicate links ({len(dup_link_works)}):\n")
-        for (wid,) in dup_link_works:
+        for wid in dup_link_works:
             f.write(f"  {wid}\n")
 
         f.write(f"\nDuplicate link detail ({len(dup_link_detail)}):\n")
@@ -749,7 +749,7 @@ def validate_compact_shard(file: ManifestData) -> list[str]:
     return errors
 
 # Concrete method
-def orchestrate():
+def orchestrate(forced_fetch: bool = False):
     """Run one full Works ingestion pass: fetch, extract, validate, delete, per shard.
 
     Downloads the manifest, splits shards into already-local vs. remote (resumability),
@@ -783,8 +783,8 @@ def orchestrate():
           docs/data_pipeline.md's deferred multi-entity refactor note.
 
     Args:
-        None. Reads module-level constants: entity, UPSTREAM_PREFIX, RAW_PATH,
-        COMPACT_PATH.
+        forced_fetch: boolean, if True then files are refetched regardless if compact
+        shard is present.
 
     Returns:
         None. Side effects: downloads/deletes files under RAW_PATH, writes files under
@@ -800,6 +800,10 @@ def orchestrate():
     """
     upstream_manifest_path = UPSTREAM_PREFIX/entity/"manifest.json"
     manifest_path = RAW_PATH/entity/"manifest.json"
+
+    Path(RAW_PATH/entity).mkdir(parents=True, exist_ok=True)
+    Path(COMPACT_PATH/entity).mkdir(parents=True, exist_ok=True)
+
     get_manifest(upstream_manifest_path, manifest_path)
 
     local_shards, remote_shards = list_local_and_remote_shards(manifest_path, RAW_PATH)
@@ -838,13 +842,13 @@ def orchestrate():
 
     for file in remote_shards:
         # Raw files not on local & compact file exist implies shard passed validation check.
-        if (Path(COMPACT_PATH/file.key).is_file()):
+        if (not forced_fetch and Path(COMPACT_PATH/file.key).is_file()):
             continue
 
         logger.info(f"Current shard: {file.key} [remote].")
         logger.info(f"Fetching shard {file.key}...")
 
-        fetch_shard(file.key, RAW_PATH/file.key)
+        fetch_shard(UPSTREAM_PREFIX/file.key, RAW_PATH/file.key)
         logger.info(f"Fetched shard {file.key} successfully, extracting shard...")
 
         extract_compact(RAW_PATH/file.key, COMPACT_PATH/file.key)
@@ -873,6 +877,7 @@ def orchestrate():
         """)
         return
 
+    logger.info(f"Finished shard extraction, validating all compact data...")
     validate_compact_data(manifest_path, COMPACT_PATH)
     logger.info(f"""
         Orchestration completed - no localized shard errors.\n 
