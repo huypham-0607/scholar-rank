@@ -349,6 +349,12 @@ def extract_compact(shard_path, out_path: Path):
 
             replace(doi, 'https://doi.org/', '') AS doi,
 
+            list_transform(keywords, a -> {
+                'id': replace(a.id, 'https://openalex.org/', ''),
+                'display_name': a.display_name,
+                'score': a.score
+            }) AS keywords,
+
             list_transform(referenced_works, a -> replace(a, 'https://openalex.org/', ''))
                 AS referenced_works,
         ),
