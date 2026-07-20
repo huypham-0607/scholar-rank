@@ -20,7 +20,7 @@ $S(d,q) = R(d,q)(w_{R} + w_{GA}GA(d)) + w_{LA}LA(d,q)$
 - $q$ - User query
 - $w_{x}$ - Specified weight for criteria $x$
 
-Criteriation terms will be scaled and normalized accordingly.
+Criteriation terms will be scaled and normalized accordingly. (Needed more research on how to effectively combine these metrics)
 
 ### 2.2) Relevance (R(d,q))
 
@@ -33,7 +33,7 @@ Compute relevance of a specific document relative to given query.
 
 Potential candidates to quantify relevance:
 - BM25 score (Title, topics & keywords - Abstract with low weight)
-- embedding similarity/semantic relevance
+- embedding similarity/semantic relevance **(deferred — see §5.3, not in the current 2-4 week milestone)**
 - Exact matches (Would weight higher for Title/keywords than abstract)
 - Query-term coverage percentage
 
@@ -72,15 +72,20 @@ Notes:
 ### Stage 1: High-recall candidate retrieval
 
 Retrieve 500-2000 potential candidates using
-- Lexical retrieval
+- Lexical retrieval — **immediate next implementation step, via DuckDB's FTS extension**
     - BM25 over title/topic/keywords
     - Title/topic/keyword matches > Abstract matches
     - Compute exact entity matches
-- Semantic retrieval
+- Semantic retrieval — **deferred, see §5.3. Not dropped: this section stays as the intended design to
+  implement once BM25 + PPR are working.**
     - Embed query and document metadata
     - Retrieve based on similarity (Further research needed)
 - Near neighbor extension (?)
     - Also retrieve close neighbor of potential candidates
+    - **More load-bearing now that semantic retrieval is deferred** — this is the only mechanism left in Stage 1
+      that can surface relevant papers not sharing vocabulary with the query. Worth promoting from "(?)" to a
+      decided part of the design once PPR exists to drive it (seed from BM25 hits, walk the full graph via
+      approximate top-k PPR — not PageRank restricted to the induced subgraph of just the candidates).
 
 Scoring system - Subject to more research
 
@@ -127,3 +132,26 @@ Baseline Models:
 
 - ie. A set of strings explaining why a particular document is ranked high.
 - Not the current main scope for now, but worth keeping in mind.
+
+### 5.3) Semantic retrieval — deferred, not dropped (2026-07-19)
+
+- Considered two "outsourcing" options to avoid computing embeddings ourselves: Semantic Scholar's pre-computed
+  SPECTER/SPECTER2 embeddings dataset (free, but coverage capped by DOI-matching — 48.5% of the OpenAlex corpus
+  has no DOI at all) and a hosted embedding API like OpenAI's batch endpoint (~$500-1500 estimated for the full
+  510M-work corpus). Neither was acceptable — coverage gap on the first, cost on the second.
+- **Decision: skip dense/semantic retrieval for the current 2-4 week milestone.** Core focus for this window is
+  implementing **Global PageRank and Approximate top-k PPR in C++** — this is where prior research investment
+  went, and it's the project's actual original thesis (see the philosophy note at the top of `initialization.md`
+  and the Project Motivation section of `README.md`: graph-based ranking as the differentiator, not
+  keyword/semantic search). BM25 (lexical retrieval, via DuckDB FTS) is the immediate next step ahead of the
+  graph-engine work specifically because it has no dependency on Phase 2/3 and is comparatively quick — days,
+  not weeks — so it's worth clearing first rather than competing for time with the harder PPR work.
+- **Semantic retrieval is planned as a follow-up after BM25 + PPR are both working**, not abandoned. When it
+  happens, revisit the Semantic Scholar / hosted-API tradeoff above — pricing, DOI coverage, and available
+  compute may all look different by then.
+- Consequence for validation (§4): with semantic retrieval out of the current milestone, the project's
+  deliverable is closer to a graph-ranking research/demo system with a lexical retrieval front end than a
+  general-purpose search engine. Worth weighting validation toward `initialization.md`'s Phase 5 "Quality
+  Benchmarks" (PPR/PageRank vs. citation-count baselines, known-foundational-papers-rank-highly checks) rather
+  than end-to-end IR metrics that assume competing as a full search engine — not yet decided, worth revisiting
+  when validation work actually starts.
