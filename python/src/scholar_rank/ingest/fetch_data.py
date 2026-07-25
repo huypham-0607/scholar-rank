@@ -76,6 +76,7 @@ columns = [
 UPSTREAM_PREFIX = Path("data/parquet")
 RAW_PATH = PROJECT_ROOT/"data"/"openalex"
 COMPACT_PATH = PROJECT_ROOT/"data"/"compact"
+DB_PATH = Path("/data")
 
 # Abstract property
 entity = "works"
@@ -168,7 +169,8 @@ def get_manifest_data(manifest_path: Path) -> list:
 
     # Getting all files metadata in manifest.json, and stripping s3 prefix.
     lst = [ManifestData(
-        key = Path(obj["url"].replace('s3://openalex/data/parquet/', '')),
+        key = Path(obj["url"].replace('s3://openalex/data/parquet/', '')) if hasattr(obj,"url")
+                else obj["key"],
         content_length = obj['meta']['content_length'],
         record_count = obj['meta']['record_count']
     ) for obj in manifest_data["files"]]
@@ -755,6 +757,24 @@ def validate_compact_shard(file: ManifestData) -> list[str]:
     return errors
 
 # Concrete method
+
+def create_database(compact_path: Path):
+    """Create a database from full corpus
+
+    Arg:
+        compact_path: Path to corpus.
+
+    Returns:
+        None
+    """
+    con = duckdb.connect(str(DB_PATH/(entity + ".db")))
+    con.read_parquet(f"{str(COMPACT_PATH)}/{entity}/**/*.parquet").create(entity)
+    con.sql(f"""
+        CREATE INDEX idx_id ON works (id)
+    """)
+    con.close()
+
+# Concrete method
 def orchestrate(forced_fetch: bool = False):
     """Run one full Works ingestion pass: fetch, extract, validate, delete, per shard.
 
@@ -889,3 +909,15 @@ def orchestrate(forced_fetch: bool = False):
         Orchestration completed - no localized shard errors.\n 
         Please navigate to {COMPACT_PATH/entity/"integrity_report.txt"} for comprehensive analysis.
     """)
+
+def main():
+    logger.info("Started creating index for db")
+    con = duckdb.connect(str(DB_PATH/(entity + ".db")))
+    con.sql(f"""
+        CREATE INDEX idx_id ON {entity} (id)
+    """)
+    logger.info("Finished creating index for db")
+    con.close()
+
+if __name__ == "__main__":
+    main()
