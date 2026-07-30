@@ -2,22 +2,35 @@
 
 ScholarRank is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
 
-# Project Status (as of 2026-07-19)
+# Project Status (as of 2026-07-25)
 
-**Data pipeline: done.** The full OpenAlex Works corpus (510M+ works, ~207GB compact) has been fetched from the
-public OpenAlex S3 snapshot, extracted to a compact schema, and validated — see `docs/data_pipeline.md` for the
-pipeline design and `python/src/scholar_rank/ingest/fetch_data.py` for the implementation.
+**Data pipeline: done.** Full OpenAlex Works corpus (510M+ works, 241GB compact) fetched, extracted, and
+validated. See `docs/data_pipeline.md`.
 
-**Current milestone (2-4 weeks): BM25 lexical retrieval + Global PageRank + Approximate top-k Personalized
-PageRank, the latter two implemented in C++.** This is a deliberate scope narrowing — dense/semantic retrieval
-is *not* part of this milestone (see below), so the near-term deliverable is closer to a graph-ranking
-research/demo system with a lexical retrieval front end than a full search engine. That's an intentional
-tradeoff to prioritize the project's core technical thesis (graph-based ranking as the differentiator — see
-Project Motivation below) over retrieval breadth. Full reasoning: `docs/algorithm_design.md` §5.3.
+**Lexical retrieval (BM25): architecture decided, build in progress.**
+- Tokenization pipeline built: title + topic hierarchy (subfield/field/domain) + keywords → normalized,
+  stemmed tokens (`python/src/scholar_rank/tokenize/`).
+- DuckDB's built-in full-text search index turned out too slow at full corpus scale, so retrieval is being
+  built as a custom **Block-Max WAND** engine instead — a dynamic-pruning algorithm that finds top-k results
+  without scoring every document. Python handles tokenization; C++ will build and serve the actual index. See
+  `docs/retrieval_engine.md`.
 
-**Semantic/embedding retrieval: planned, not abandoned.** Deferred until after the current milestone, to be
-picked up once BM25 and the PPR engine are both working. See `docs/algorithm_design.md` for the retrieval
-architecture it's designed to slot into.
+**Graph engine (Global PageRank + Approximate top-k Personalized PageRank, C++): not started.** Prep work
+done: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to develop and
+validate against, instead of iterating against the full 510M-node graph on every change.
+
+**Semantic/embedding retrieval: still deferred, not abandoned** — picked up once BM25 and the graph engine
+are both working.
+
+## Current progress & near-term todo
+
+- [x] Data pipeline (Phase 1)
+- [x] Tokenization/normalization pipeline
+- [x] Development test subgraph (Mathematics field subset)
+- [ ] Block-Max WAND index construction + query engine (C++)
+- [ ] Global PageRank (C++)
+- [ ] Approximate top-k Personalized PageRank (C++)
+- [ ] End-to-end validation against public benchmarks (BEIR for lexical, SNAP/OGB citation graphs for ranking)
 
 # Project Motivation
 
@@ -33,8 +46,10 @@ The goal is to build a literature discovery tool that is:
 
 # Project structure
 
-- `python/src/scholar_rank/` — Python package: data ingestion (`ingest/fetch_data.py`), shared utilities.
-- `python/notebook/` — exploratory/one-off analysis (corpus null-rate sweeps, ad hoc backfills).
+- `python/src/scholar_rank/` — Python package: data ingestion (`ingest/`), test-subgraph tooling (`subset/`),
+  tokenization pipeline (`tokenize/`), shared utilities.
+- `python/notebook/` — exploratory/one-off analysis (corpus null-rate sweeps, ad hoc backfills, field-score
+  distributions).
 - `docs/` — design docs: `initialization.md` (full project spec/phases), `data_pipeline.md` (Phase 1 pipeline
   design), `algorithm_design.md` (Phase 4 retrieval/scoring design), `data_reference.md` (OpenAlex field
   reference).
@@ -53,8 +68,9 @@ A paper's relevance score for a given query combines three signals — full form
 `docs/algorithm_design.md`:
 
 - **Relevance ($R(d,q)$)** — how well a paper textually/semantically matches the query.
-  - *Active*: BM25 over title/topics/keywords — the immediate next implementation step, via DuckDB's FTS
-    extension.
+  - *Active*: BM25 over title/topic-hierarchy/keywords, served by a custom Block-Max WAND engine (retrieves
+    top-k without scoring every document — DuckDB's built-in full-text index was tried first, too slow at
+    full corpus scale). See `docs/retrieval_engine.md`.
   - *Deferred, not dropped*: embedding-based semantic relevance. Designed in, planned as a follow-up once BM25
     and the graph engine below are both working — see Project Status above.
 - **Local authority ($LA(d,q)$)** — a paper's graph-based authority *relative to the query*. Approximate top-k

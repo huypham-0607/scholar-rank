@@ -72,11 +72,38 @@ Normalization rules are as follows:
 - All tokens will be decapitalized.
 - All non-alphabetical characters are stripped (This is of minimal impact for our dataset, since our fields are generally low-nuance).
 
-For stemmer, we will be using standard PyStemmer.
+For stemmer, we use DuckDB FTS's built-in `stem(token, 'english')` function directly in SQL — this is
+Snowball/Porter2 under the hood, not the original 1980 Porter algorithm (`'porter'` is a separate, worse
+option in the same extension). No Python stemming library needed. Known over-stemming collisions (e.g.
+`organization`/`organic`/`organ` all reducing to `organ`) were tested and found to occur under both variants —
+inherent to rule-based stemming generally, not fixable by switching stemmer choice. Accepted as sufficient for
+BM25: IDF naturally discounts collision-heavy stems, and multi-term queries dilute single-term noise.
 
-#### 2.2.2) Inverted Index List (Posting List).
+#### 2.2.2) Inverted Index List (Posting List)
 
+**Language boundary**: Python's job stops at producing tokens (2.2.1). Everything past that — dictionary,
+inversion, sorting, block-max metadata, serialization, merge — is C++. Handoff is chunked `(id, tokens)`
+parquet, not a pre-grouped intermediate — grouping into per-term posting lists is inversion, which belongs on
+the C++ side with everything else, not split across languages.
 
+**Build strategy — SPIMI / block-sort indexing**: process tokenized chunks one at a time, build a partial
+index per chunk in memory, flush to disk sorted by term, merge all partial indexes at the end. Standard answer
+(Manning/Raghavan/Schütze ch. 4) to indexing a corpus larger than available RAM.
+
+**Per-term storage — two arrays, not one flat list**:
+
+| Array | Contents | Purpose |
+|---|---|---|
+| Block metadata | `last_doc_id`, `max_score`/`max_impact`, `posting_offset`, `count` — one entry per block | Scanned to decide skip/no-skip *without* touching postings |
+| Posting data | `doc_id` delta + `tf`, sorted by `doc_id` | Only read for blocks that survive pruning |
+
+- Fixed-size blocks to start (constant stride, e.g. 64/128 postings) — VBMW's variable blocks are a real
+  upgrade once this works, not a starting point.
+- **Open tradeoff, not yet decided**: precomputed max BM25 *score* per block (tighter bound, but ties the
+  index to fixed `k1`/`b` — retuning needs a rebuild) vs. raw max *impact/tf* (flexible, but needs
+  min-doc-length-in-block tracked too, since shorter docs get less length-penalty).
+- Final index ships as flat binary file(s), `mmap()`-ed at query time — lets the OS page blocks in on demand
+  instead of requiring the whole index resident in RAM, same motivation as chunked SPIMI construction.
 
 ## 3. Readings
 
