@@ -49,69 +49,36 @@ A few issues:
 
 ### 2.2) Design
 
-We will use BM25F as our core ranking system. BM25F will run on these fields:
+We will use Block-Max WAND with BM25 as our core ranking metric.
+
+#### 2.2.1) Tokenization
+
+We will construct our document by concatenating elements across 6 fields
 
 | Field name                | Type          | Desc                                                              |
 | ------------------------- | ------------- | ------------------------------------------------------------------|
-| `title`                   | `VARCHAR`     | Title of the work |
-| `topics`                  | `VARCHAR`     | Collapsed, concatenated & stopword-free topics. |
-| `subfields`               | `VARCHAR`     | Collapsed, concatenated & stopword-free subfields. |
-| `fields`                  | `VARCHAR`     | Collapsed, concatenated & stopword-free subfields. |
-| `domains`                 | `VARCHAR`     | Collapsed, concatenated & stopword-free domains. |
-| `keywords`                | `VARCHAR`     | Concatenated keywords. |
+| `title`                   | `VARCHAR`     | Title of given work |
+| `topics`                  | `VARCHAR`     | OpenAlex assigned topics of given work |
+| `subfields`               | `VARCHAR`     | OpenAlex assigned subfields of given work |
+| `fields`                  | `VARCHAR`     | OpenAlex assigned fields of given work |
+| `domains`                 | `VARCHAR`     | OpenAlex assigned domains of given work |
+| `keywords`                | `VARCHAR`     | OpenAlex assigned keywords of given work |
 
-Additional notes: We are losing a lot of information by treating all keywords and topics with the same weight (especially for topic where the difference between rank 1 and rank 2 topic is substantial). There is a potential remedy for this - Using Reciprocal Rank Fusion to estimate the weight for each terms. But this feature will be delegated.
 
-### 2.3) Resolutions to §2.1's concerns
+As a preliminary design, we will consider each single word as a token. Hyphen connected words are collapsed an considered a single word. For instance "We value your well-being" will be considered 5 tokens: "We", "value", "your", "well", "being". For the scope of this project, machine learning based tokenization methods are not considered.
 
-1. **Domain/Field/Subfield weight when topics share an LCA**: undeduplicated hierarchy repetition is kept, not
-   stripped — a paper whose topics converge on the same subfield/field/domain gets that concentration reflected
-   naturally through repeated term frequency (subject to BM25's own saturation, so it doesn't runaway-inflate).
-   Empirically, subfield-level convergence is the most informative level to lean on if this ever becomes an
-   explicit feature (~32.6% of multi-topic docs converge there vs. 76.1% at field and 94.3% at domain — domain
-   convergence is close to a given given only ~4-5 domains exist total, so it carries little discriminating
-   signal despite being extremely common).
-2. **Word appearing in multiple columns** (title/topics-hierarchy/keywords): resolved as part of the BM25F
-   correction below — pooling term frequency across fields before one shared saturation curve means repeated
-   words across fields don't get an inflated, double-counted bonus the way naively summing separate per-field
-   BM25 scores would.
-3. **OpenAlex topic/keyword `score` field**: **dropped for this phase** — topics and keywords are indexed with
-   uniform term frequency, no weighting by their OpenAlex confidence score. Simplifies indexing (no need to
-   inject per-token weight via repetition or custom tf) at the cost of losing real signal (topic rank-1 vs.
-   rank-2 scores differ substantially — median 0.801 vs. 0.195). Revisit with rank-based weighting (not raw
-   score magnitude) if this matters later — raw magnitude isn't safely comparable across documents (e.g.
-   keyword scores run systematically ~0.05-0.13 higher for documents that have an abstract, since OpenAlex
-   derives keyword scores from title+abstract), but a document's own rank ordering (its top keyword is still
-   its top keyword) isn't affected by that confound.
-4. **Abstract usage**: excluded from lexical scoring entirely for this phase — not just because it's long/noisy
-   text, but because IDF computed over the whole corpus (abstract is null for 47.72% of it) makes any word
-   confined to abstract text look artificially rarer, and therefore artificially higher-weighted, than its true
-   in-context commonness (verified: "and" appears in 64% of abstract-having docs but only 33.5% of the full
-   corpus, giving IDF≈1.09, not the near-zero a stopword should get). This isn't fixable by a stopword list
-   alone since it applies to any word common-in-abstract but absent from null-abstract documents, not just
-   canonical stopwords. A separate idea — rescaling other fields' weights per-document when abstract is null,
-   so the weight "budget" stays constant — was considered and ruled out: BM25F has no real score ceiling
-   proportional to total field weight, so there's nothing principled to redistribute; a missing field
-   contributing exactly 0 is already correct behavior, identical to a present field with no query-term overlap.
+Normalization rules are as follows:
+- All accents are stripped.
+- All tokens will be decapitalized.
+- All non-alphabetical characters are stripped (This is of minimal impact for our dataset, since our fields are generally low-nuance).
 
-**Update**: Utilizing DuckDB built-in FTS extension for querying top-k relevant documents is potentially too slow. Exploring alternative sub-linear solutions instead.
+For stemmer, we will be using standard PyStemmer.
 
-## 3. Approximate top-k retrieval (dynamic pruning)
+#### 2.2.2) Inverted Index List (Posting List).
 
-`match_bm25`'s documented usage pattern (`SELECT *, match_bm25(id, query) FROM works WHERE score IS NOT NULL`)
-projects over the entire base table before filtering — no evidence found that DuckDB pushes this into an index
-seek (the internal `fts_main_<table>` schema isn't documented), and observed performance across the full 510M
-rows is consistent with a full scan. The IR literature has a well-established answer to "get the top-k
-BM25-scoring documents without scoring every candidate": dynamic pruning algorithms that exploit BM25's
-per-term score upper bound (saturation guarantees a term can never contribute more than `IDF(q_i) * (k+1)`) to
-skip documents that provably can't enter the top-k, without touching documents that share zero query terms.
 
-Likely means implementing this ourselves as a custom component (own postings representation, own top-k loop)
-rather than through DuckDB's FTS macro — WAND/BMW fundamentally need sorted posting-list iterators with
-skip-ahead and a priority-queue control loop, which doesn't map onto declarative bulk SQL. This also parallels
-Approximate top-k PPR (Phase 3): both are instances of "priority queue bounded by an upper-bound function"
-best-first search, just with a different upper-bound function (residual mass for PPR's local push, per-term
-score bound for BM25's dynamic pruning).
+
+## 3. Readings
 
 ### 3.1) Core algorithms, roughly in reading order
 
