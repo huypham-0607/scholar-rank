@@ -63,6 +63,28 @@ Notes:
 - As per the formula referenced in section 2.1, $GA(d)$ is scaled with $R(d,q)$. This is to ensure that generally credible but unrelated papers will not flood top results.
 - Due to the near-DAG feature of citation graphs, we need a way to limit the effect of paper age for our PageRank. We can read [this paper about CiteRank](https://arxiv.org/abs/physics/0612122) for information and potential fix.
 
+**Graph storage (CSR/CSC)**: PageRank's power iteration is repeated sparse matrix-vector multiplication, so
+storage format directly determines which access pattern is fast. PageRank's natural update — $rank(v) = \sum$
+over in-neighbors $u$ of $rank(u)/outdegree(u)$ — is a *gather from in-neighbors* operation, which wants
+column-wise access (CSC), or equivalently CSR built over the graph's transpose. A scatter/push-style
+implementation (distribute rank along out-edges instead) wants CSR of the graph as-is. Decide which
+formulation is being implemented before deciding whether one representation suffices or both are needed —
+not yet decided.
+
+Resources (CSR/CSC structure often under-explained as "just a list of nonzero index-value pairs," which is
+actually COO format — the real CSR/CSC insight is the `row_ptr`/`col_ptr` array giving O(1) indexed row/column
+access, not linear scan):
+- [Scientific Python Lectures: CSR](https://lectures.scientific-python.org/advanced/scipy_sparse/csr_array.html) /
+  [CSC](https://lectures.scientific-python.org/advanced/scipy_sparse/csc_array.html) — clearest explanation of
+  the actual 3-array structure.
+- [scipy `csr_array`/`csc_array` docs](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csr_array.html) —
+  good for hands-on verification in Python before implementing from scratch in C++.
+- [GraphBLAS](https://graphblas.org/) / [SuiteSparse:GraphBLAS paper](https://people.engr.tamu.edu/davis/GraphBLAS_files/toms_graphblas.pdf) —
+  the "graph algorithm = sparse linear algebra over a semiring" framing; PageRank is a canonical example.
+- [nicholasRenninger/PageRank_Algorithm-CSR](https://github.com/nicholasRenninger/PageRank_Algorithm-CSR) — a
+  hand-built C++ PageRank implementation over a hand-built CSR structure, not library-wrapped — closer to what
+  this project is actually building than a scipy-based example.
+
 ### 2.5) Additional/Experimental criterias (subject to change)
 - F(d,q): Freshness score for a document/query pair, Higher score for more recent paper, and higher/lower score if query explicitly mention a timestamp.
 - Q(d): Intrinsic Quality for a research paper. Hard to quantify this.
