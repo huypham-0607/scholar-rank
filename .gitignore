@@ -8,6 +8,10 @@ data/
 # Python
 __pycache__/
 
+# Makefiles
+*/build/
+
+
 # Misc
 .vscode/
 
