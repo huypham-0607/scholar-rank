@@ -2,32 +2,34 @@
 
 ScholarRank is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
 
-# Project Status (as of 2026-07-25)
+# Project Status (as of 2026-08-02)
 
 **Data pipeline: done.** Full OpenAlex Works corpus (510M+ works, 241GB compact) fetched, extracted, and
 validated. See `docs/data_pipeline.md`.
 
-**Lexical retrieval (BM25): architecture decided, build in progress.**
-- Tokenization pipeline built: title + topic hierarchy (subfield/field/domain) + keywords → normalized,
-  stemmed tokens (`python/src/scholar_rank/tokenize/`).
-- DuckDB's built-in full-text search index turned out too slow at full corpus scale, so retrieval is being
-  built as a custom **Block-Max WAND** engine instead — a dynamic-pruning algorithm that finds top-k results
-  without scoring every document. Python handles tokenization; C++ will build and serve the actual index. See
+**Three technical pillars, in progress:**
+- **Block-Max WAND** — a custom lexical retrieval engine (dynamic pruning, finds top-k results without scoring
+  every document), replacing DuckDB's built-in full-text search, which was too slow at full corpus scale.
+  Tokenization (Python) is built and working; index construction (C++) is in progress. See
   `docs/retrieval_engine.md`.
+- **Global PageRank** — whole-graph authority score. Not started yet.
+- **Approximate top-k Personalized PageRank (local push)** — query-time, seed-driven authority that stays
+  bounded-memory by walking only the relevant part of the graph rather than the whole thing. Not started yet.
 
-**Graph engine (Global PageRank + Approximate top-k Personalized PageRank, C++): not started.** Prep work
-done: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to develop and
-validate against, instead of iterating against the full 510M-node graph on every change.
+Supporting work: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to
+develop and validate against, instead of iterating against the full 510M-node graph on every change. A basic
+C++ build system and logging utility are working.
 
-**Semantic/embedding retrieval: still deferred, not abandoned** — picked up once BM25 and the graph engine
-are both working.
+**Semantic/embedding retrieval: dropped for now**, not part of the near-term plan — judged too computationally
+ambitious to take on alongside the three pillars above. May be revisited later (not before ~3 months out).
 
 ## Current progress & near-term todo
 
 - [x] Data pipeline (Phase 1)
 - [x] Tokenization/normalization pipeline
 - [x] Development test subgraph (Mathematics field subset)
-- [ ] Block-Max WAND index construction + query engine (C++)
+- [x] C++ build system + logging
+- [ ] Block-Max WAND index construction (C++, in progress) + query engine
 - [ ] Global PageRank (C++)
 - [ ] Approximate top-k Personalized PageRank (C++)
 - [ ] End-to-end validation against public benchmarks (BEIR for lexical, SNAP/OGB citation graphs for ranking)
@@ -71,8 +73,8 @@ A paper's relevance score for a given query combines three signals — full form
   - *Active*: BM25 over title/topic-hierarchy/keywords, served by a custom Block-Max WAND engine (retrieves
     top-k without scoring every document — DuckDB's built-in full-text index was tried first, too slow at
     full corpus scale). See `docs/retrieval_engine.md`.
-  - *Deferred, not dropped*: embedding-based semantic relevance. Designed in, planned as a follow-up once BM25
-    and the graph engine below are both working — see Project Status above.
+  - *Dropped for now*: embedding-based semantic relevance — too computationally ambitious to take on alongside
+    the current milestone. See Project Status above.
 - **Local authority ($LA(d,q)$)** — a paper's graph-based authority *relative to the query*. Approximate top-k
   - Personalized PageRank / local push, seeded from BM25 candidates but walking the **full** citation graph, not just the candidate subset.
 - **Global authority ($GA(d)$)** — a paper's general citation-graph prestige, independent of any query.

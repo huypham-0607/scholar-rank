@@ -71,6 +71,8 @@ Normalization rules are as follows:
 - All accents are stripped.
 - All tokens will be decapitalized.
 - All non-alphabetical characters are stripped (This is of minimal impact for our dataset, since our fields are generally low-nuance).
+- Stopwords are stripped from the concatenated document text *before* tokenization (a fixed English stopword
+  list, matched with regex word boundaries, replaced globally — not just the first occurrence).
 
 For stemmer, we use DuckDB FTS's built-in `stem(token, 'english')` function directly in SQL — this is
 Snowball/Porter2 under the hood, not the original 1980 Porter algorithm (`'porter'` is a separate, worse

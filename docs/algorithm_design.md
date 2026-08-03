@@ -33,7 +33,7 @@ Compute relevance of a specific document relative to given query.
 
 Potential candidates to quantify relevance:
 - BM25 score (Title, topics & keywords - Abstract with low weight)
-- embedding similarity/semantic relevance **(deferred — see §5.3, not in the current 2-4 week milestone)**
+- embedding similarity/semantic relevance **(dropped for now — see §5.3)**
 - Exact matches (Would weight higher for Title/keywords than abstract)
 - Query-term coverage percentage
 
@@ -98,8 +98,7 @@ Retrieve 500-2000 potential candidates using
     - BM25 over title/topic/keywords
     - Title/topic/keyword matches > Abstract matches
     - Compute exact entity matches
-- Semantic retrieval — **deferred, see §5.3. Not dropped: this section stays as the intended design to
-  implement once BM25 + PPR are working.**
+- Semantic retrieval — **dropped for now, see §5.3.** Design sketch below kept for reference if revisited later.
     - Embed query and document metadata
     - Retrieve based on similarity (Further research needed)
 - Near neighbor extension (?)
@@ -155,25 +154,39 @@ Baseline Models:
 - ie. A set of strings explaining why a particular document is ranked high.
 - Not the current main scope for now, but worth keeping in mind.
 
-### 5.3) Semantic retrieval — deferred, not dropped (2026-07-19)
+### 5.3) Semantic retrieval — fully dropped for now (2026-08-02)
+- Would be too ambitous computationally.
+- Perhaps would revisit in the future (after ~3 months at least)
 
-- Considered two "outsourcing" options to avoid computing embeddings ourselves: Semantic Scholar's pre-computed
-  SPECTER/SPECTER2 embeddings dataset (free, but coverage capped by DOI-matching — 48.5% of the OpenAlex corpus
-  has no DOI at all) and a hosted embedding API like OpenAI's batch endpoint (~$500-1500 estimated for the full
-  510M-work corpus). Neither was acceptable — coverage gap on the first, cost on the second.
-- **Decision: skip dense/semantic retrieval for the current 2-4 week milestone.** Core focus for this window is
-  implementing **Global PageRank and Approximate top-k PPR in C++** — this is where prior research investment
-  went, and it's the project's actual original thesis (see the philosophy note at the top of `initialization.md`
-  and the Project Motivation section of `README.md`: graph-based ranking as the differentiator, not
-  keyword/semantic search). BM25 (lexical retrieval, via DuckDB FTS) is the immediate next step ahead of the
-  graph-engine work specifically because it has no dependency on Phase 2/3 and is comparatively quick — days,
-  not weeks — so it's worth clearing first rather than competing for time with the harder PPR work.
-- **Semantic retrieval is planned as a follow-up after BM25 + PPR are both working**, not abandoned. When it
-  happens, revisit the Semantic Scholar / hosted-API tradeoff above — pricing, DOI coverage, and available
-  compute may all look different by then.
-- Consequence for validation (§4): with semantic retrieval out of the current milestone, the project's
-  deliverable is closer to a graph-ranking research/demo system with a lexical retrieval front end than a
-  general-purpose search engine. Worth weighting validation toward `initialization.md`'s Phase 5 "Quality
-  Benchmarks" (PPR/PageRank vs. citation-count baselines, known-foundational-papers-rank-highly checks) rather
-  than end-to-end IR metrics that assume competing as a full search engine — not yet decided, worth revisiting
-  when validation work actually starts.
+
+# 6. Project tree
+
+Actual layout uses `utils/` (not `common/`) for shared infrastructure — updated below to match. Items marked
+✅ exist and work; ⏳ exist but incomplete; unmarked = not started yet.
+
+```
+cpp/
+├── CMakeLists.txt                      ✅ C++20, compile_commands.json, Release build
+├── include/scholar_rank/
+│   ├── utils/logger.hpp                ✅
+│   ├── retrieval/                      # posting list, dictionary, WAND/BMW query engine headers
+│   └── graph/                          # CSR/CSC structures, PageRank, PPR headers
+├── src/
+│   ├── utils/logger.cpp                ✅ zoned_time timestamps, std::cerr output
+│   ├── retrieval/
+│   │   ├── index_builder.cpp           ⏳ SPIMI construction — structure in place, does not compile yet
+│   │   ├── posting_list.cpp
+│   │   └── query_engine.cpp            # WAND/BMW top-k traversal
+│   └── graph/
+│       ├── csr_builder.cpp
+│       ├── pagerank.cpp
+│       └── ppr.cpp
+├── apps/
+│   ├── build_index.cpp                 # CLI: tokenized parquet -> serialized index
+│   ├── build_graph.cpp                 # CLI: edge list -> CSR/CSC
+│   └── query.cpp                       # CLI: run a query against a built index
+├── tests/
+│   ├── retrieval/
+│   └── graph/
+└── benchmarks/                         # ties to the BEIR/SNAP/OGB datasets already compiled
+```
