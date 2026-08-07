@@ -34,6 +34,8 @@ set(CMAKE_BUILD_TYPE Release)
 # Purely organization, but nice to have.
 set(SCHOLAR_RANK_SOURCES
     src/utils/logger.cpp
+    src/utils/vbe.cpp
+    src/utils/file_io.cpp
     src/retrieval/index_builder.cpp
 )
 
@@ -44,3 +46,21 @@ add_library(scholar_rank_core ${SCHOLAR_RANK_SOURCES})
 target_include_directories(scholar_rank_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Adding tests
+FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
+FetchContent_MakeAvailable(googletest)
+
+add_executable(vbe_tests tests/utils/vbe_test.cpp)
+target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(file_io_tests tests/utils/file_io.cpp)
+target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(index_builder_tests tests/retrieval/index_builder_test.cpp)
+target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(vbe_tests)
+gtest_discover_tests(file_io_tests)
+gtest_discover_tests(index_builder_tests)

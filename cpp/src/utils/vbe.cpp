@@ -18,7 +18,7 @@ size_t vbe_encode(unsigned long long num, unsigned char buffer[]) {
 }
 
 unsigned long long vbe_decode(unsigned char buffer[]) {
-    int decoded = 0;
+    unsigned long long decoded = 0;
     int idx = 0;
     while (idx < BUFFER_LIMIT) {
         if (buffer[idx] >= 128) {

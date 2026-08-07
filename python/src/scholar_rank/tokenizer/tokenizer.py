@@ -65,11 +65,21 @@ class Tokenizer:
             ORDER BY id ASC
         """)
 
+        logger.info(con.sql("SELECT count(*) FROM token_stream").fetchone())
+
+        # Hardcoded here for debugging.
+        token_list = con.sql(f"""
+            COPY token_stream
+            TO '{"/data/cached"}/token_data.parquet'
+            (FORMAT PARQUET, COMPRESSION zstd) 
+        """)
+
         buf = io.BytesIO()
 
         file_count = 0
 
         batch = token_stream.fetchmany(self.ROW_PER_CHUNK)
+        self.OUT_PATH.mkdir(parents=True, exist_ok=True)
         while batch:
             chunk_count = 0
             file_name = f"token_{file_count:04d}.bin"
@@ -100,7 +110,7 @@ def main():
     
     label = 'math_english'
 
-    tokenizer = Tokenizer(DB_PATH/label, DB_PATH/label)
+    tokenizer = Tokenizer(DB_PATH/label, DB_PATH/label/"token_stream")
     tokenizer.get_token()
 
 if __name__ == "__main__":

@@ -9,7 +9,9 @@
  * 
  */
 
+#include "scholar_rank/retrieval/index_builder.hpp"
 #include "scholar_rank/utils/vbe.hpp"
+#include "scholar_rank/utils/file_io.hpp"
 
 #include <algorithm>
 #include <string>
@@ -17,53 +19,51 @@
 #include <vector>
 #include <cstdio>
 #include <stdexcept>
+#include <filesystem>
+#include <format>
 
 constexpr unsigned int MAX_TERM_LENGTH = 256;       // Might change depending on dataset
 constexpr unsigned int EST_UMAP_MEM_PER_ENTRY = 48; // Safe estimation of std::unordered_map mem usage per entry
+constexpr unsigned int TOKEN_STREAM_LIMIT = 10000;  // Max number of token streams accepted
 
-struct PostingItem {
-    unsigned long long doc_id;
-    unsigned int freq;
+constexpr std::string BLOCK_PREFIX = "token_";
 
-    PostingItem(long long _doc_id, int _freq) : doc_id(_doc_id), freq(_freq) {}
-};
+namespace fs = std::filesystem;
 
-class PostingList {
-private:
-    std::vector<PostingItem> list;
-public:
-    PostingList() {
-        list = std::vector<PostingItem>();
+
+PostingItem::PostingItem(long long _doc_id, int _freq) : doc_id(_doc_id), freq(_freq) {}
+
+PostingList::PostingList() {
+    list = std::vector<PostingItem>();
+}
+
+bool PostingList::has_document(long long doc_id) {
+    return (!list.empty() && list.back().doc_id == doc_id);
+}
+
+void PostingList::add_document(long long doc_id) {
+    // Assuming doc_id are monotonically increasing (ensured by token stream)
+    if (list.empty() || list.back().doc_id != doc_id) {
+        list.push_back(PostingItem(doc_id, 1));
     }
-
-    bool has_document(long long doc_id) {
-        return (!list.empty() && list.back().doc_id == doc_id);
+    else {
+        list.back().freq++;
     }
+}
 
-    void add_document(long long doc_id) {
-        // Assuming doc_id are monotonically increasing (ensured by token stream)
-        if (list.empty() || list.back().doc_id != doc_id) {
-            list.push_back(PostingItem(doc_id, 1));
-        }
-        else {
-            list.back().freq++;
-        }
-    }
+size_t PostingList::size() {
+    return list.size();
+}
 
-    size_t size() {
-        return list.size();
+const PostingItem& PostingList::operator[] (size_t idx) const {
+    if (idx >= list.size()) {
+        throw std::out_of_range("Posting list index out of bounds.");
     }
-
-    const PostingItem& operator[] (size_t idx) const {
-        if (idx >= list.size()) {
-            throw std::out_of_range("Posting list index out of bounds.");
-        }
-        return list[idx];
-    }
-};
+    return list[idx];
+}
 
 bool readToken(FILE *token_stream, unsigned long long *ptr_doc_id, std::string *ptr_term) {
-    int arg_count = fread(ptr_doc_id, sizeof(ptr_doc_id), 1, token_stream);
+    int arg_count = fread(ptr_doc_id, sizeof(*ptr_doc_id), 1, token_stream);
     if (!arg_count) {
         if (feof(token_stream)) return false;
         throw std::runtime_error("I/O error reading doc_id.");
@@ -82,10 +82,12 @@ bool readToken(FILE *token_stream, unsigned long long *ptr_doc_id, std::string *
     return true;
 }
 
-void spimi_invert(FILE *token_stream, std::string out_file_name, size_t mem_limit) {
-    std::unordered_map<std::string, PostingList> posting_list_mapping;
-    std::vector<std::string> dictionary;
-
+bool build_partial_index(
+    FILE* token_stream,
+    const size_t mem_limit,
+    std::unordered_map<std::string, PostingList> &posting_list_mapping,
+    std::vector<std::string> &dictionary
+) {
     size_t mem_usage = 0;
 
     unsigned long long cur_doc_id; 
@@ -107,7 +109,15 @@ void spimi_invert(FILE *token_stream, std::string out_file_name, size_t mem_limi
     }
 
     std::sort(dictionary.begin(), dictionary.end());
-    FILE *out_file = std::fopen(out_file_name.c_str(), "wb");
+    return (dictionary.size() != 0);
+}
+
+void write_partial_index(
+    const fs::path out_file_path,
+    std::unordered_map<std::string, PostingList>& posting_list_mapping,
+    std::vector<std::string>& dictionary
+) {
+    FILE *out_file = std::fopen(out_file_path.string().c_str(), "wb");
 
     unsigned int dictionary_size = dictionary.size();
     fwrite(&dictionary_size, sizeof(dictionary_size), 1, out_file);
@@ -137,10 +147,37 @@ void spimi_invert(FILE *token_stream, std::string out_file_name, size_t mem_limi
     fclose(out_file);
 }
 
-/* 
- * For each posting:
- * 
- * 
- */ 
+void construct_inverted_blocks(
+    const fs::path& in_dir,
+    const fs::path& out_dir,
+    const size_t mem_limit
+) {
+    std::unordered_map<std::string, PostingList> posting_list_mapping;
+    std::vector<std::string> dictionary;
 
-void spimi_merge(FILE *token_stream) {}
+    std::vector<fs::path> token_streams = globFiles(in_dir, "", ".bin");
+    sort(token_streams.begin(), token_streams.end());
+
+    int partial_block_counter = 0;
+
+    for (auto &token_stream : token_streams) {
+        FILE *fp = std::fopen(token_stream.string().c_str(), "rb");
+        while (build_partial_index(
+            fp,
+            mem_limit,
+            posting_list_mapping,
+            dictionary
+        )) {
+            write_partial_index(
+                out_dir / std::format("block_{:04}.bin", partial_block_counter),
+                posting_list_mapping,
+                dictionary
+            );
+
+            ++partial_block_counter;
+            posting_list_mapping.clear();
+            dictionary.clear();
+        }
+        fclose(fp);
+    }
+}
