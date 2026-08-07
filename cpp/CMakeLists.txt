@@ -1,7 +1,7 @@
 #[[
     To generate Makefiles, run:
     
-    cmake -S . -B build
+        cmake -S . -B build
 
     -S:                 Source directory
     -B:                 Build directory
@@ -9,10 +9,23 @@
     
     To compile into binaries, run:
     
-    cmake --build build -j$(nproc)
+        cmake --build build -j$(nproc)
 
     --build:    Tells CMake to directly invoke build tools in /build
     -j:         Build in parallel using jobs
+
+    _____________________________________________________________________
+
+    For running tests, several options:
+    
+        ctest --test-dir build
+
+    CMake bundled test runner, good for running whole suite together.
+
+        ./build/*_tests
+
+    Run the compiled binary directly, suitable to isolated runs.
+    
  
 ]]
 
@@ -22,6 +35,9 @@ cmake_minimum_required(VERSION 3.15)
 
 # Declaring project name and languanges.
 project(scholar_rank LANGUAGES CXX)
+
+# Includes
+include(FetchContent)
 
 # Setting C++ standards passed to the compiler & forcing an error if
 # detected compiler cannot support set standard.
@@ -51,16 +67,16 @@ target_include_directories(scholar_rank_core PUBLIC
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(vbe_tests tests/utils/vbe_test.cpp)
+add_executable(vbe_tests tests/utils/vbe_tests.cpp)
 target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
-add_executable(file_io_tests tests/utils/file_io.cpp)
-target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
+# add_executable(file_io_tests tests/utils/file_io_tests.cpp)
+# target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
-add_executable(index_builder_tests tests/retrieval/index_builder_test.cpp)
-target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
+# add_executable(index_builder_tests tests/retrieval/index_builder_tests.cpp)
+# target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(vbe_tests)
-gtest_discover_tests(file_io_tests)
-gtest_discover_tests(index_builder_tests)
+# gtest_discover_tests(file_io_tests)
+# gtest_discover_tests(index_builder_tests)

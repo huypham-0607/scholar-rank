@@ -22,10 +22,10 @@ unsigned long long vbe_decode(unsigned char buffer[]) {
     int idx = 0;
     while (idx < BUFFER_LIMIT) {
         if (buffer[idx] >= 128) {
-            decoded += buffer[idx] - 128;
+            decoded += (1LL << (idx*7))*(buffer[idx] - 128);
             break;
         }
-        decoded += buffer[idx];
+        decoded += (1LL << (idx*7)) * buffer[idx];
 
         ++idx;
     }
