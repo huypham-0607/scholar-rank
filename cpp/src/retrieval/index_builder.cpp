@@ -12,6 +12,7 @@
 #include "scholar_rank/retrieval/index_builder.h"
 #include "scholar_rank/utils/vbe.h"
 #include "scholar_rank/utils/file_io.h"
+#include "scholar_rank/utils/logger.h"
 
 #include <algorithm>
 #include <string>
@@ -24,6 +25,8 @@
 
 namespace fs = std::filesystem;
 
+// Compiler specific
+Logger logger(__FILE_NAME__, Logger::DEBUG);
 
 PostingItem::PostingItem(const long long _doc_id, const int _freq) : doc_id(_doc_id), freq(_freq) {}
 
@@ -56,28 +59,54 @@ const PostingItem& PostingList::operator[] (size_t idx) const {
     return list[idx];
 }
 
-bool readToken(FILE *token_stream, unsigned long long *ptr_doc_id, std::string *ptr_term) {
+
+/**
+ * @brief Read a single doc_id - term pair
+ * 
+ * token_stream is a binary stream, with layout:
+ * 
+ *      <doc_id><term_length><term_value>...
+ * 
+ * Each character in term_value is 1 byte (ASCII)
+ * 
+ * @param token_stream 
+ * @param ptr_doc_id 
+ * @param ptr_term 
+ * @return true 
+ * @return false 
+ */
+bool read_token(
+    FILE* const token_stream,
+    unsigned long long* const ptr_doc_id,
+    std::string* const ptr_term
+) {
+    if (token_stream == NULL) {
+        throw std::runtime_error("Invalid token stream.");
+    }
+
+    long initial_pos = ftell(token_stream);
     int arg_count = fread(ptr_doc_id, sizeof(*ptr_doc_id), 1, token_stream);
-    if (!arg_count) {
-        if (feof(token_stream)) return false;
+    if (arg_count != 1) {
+        long bytes_read = ftell(token_stream) - initial_pos;
+        if (bytes_read == 0) return false;
         throw std::runtime_error("I/O error reading doc_id.");
     }
 
     unsigned short term_size;
     arg_count = fread(&term_size, sizeof(term_size), 1, token_stream);;
-    if (!arg_count) throw std::runtime_error("I/O error reading term_size.");
+    if (arg_count != 1) throw std::runtime_error("I/O error reading term_size.");
     
     if (term_size > MAX_TERM_LENGTH) throw std::runtime_error("Erroneous term_size.");
     ptr_term->resize(term_size);
 
     arg_count = fread(&(*ptr_term)[0], sizeof(char), term_size, token_stream);
-    if (arg_count != term_size) throw std::runtime_error("I/O error reading term.");
+    if (arg_count != term_size) throw std::runtime_error("I/O error reading term_value.");
 
     return true;
 }
 
 bool build_partial_index(
-    FILE* token_stream,
+    FILE* const token_stream,
     const size_t mem_limit,
     std::unordered_map<std::string, PostingList> &posting_list_mapping,
     std::vector<std::string> &dictionary
@@ -87,7 +116,7 @@ bool build_partial_index(
     unsigned long long cur_doc_id; 
     std::string cur_term;
     
-    while ((mem_usage < mem_limit/5*4) && readToken(token_stream, &cur_doc_id, &cur_term)) {
+    while ((mem_usage < mem_limit/5*4) && read_token(token_stream, &cur_doc_id, &cur_term)) {
         if (posting_list_mapping.find(cur_term) == posting_list_mapping.end()) {
             dictionary.push_back(cur_term);
             posting_list_mapping[cur_term] = PostingList();
@@ -112,6 +141,10 @@ void write_partial_index(
     std::vector<std::string>& dictionary
 ) {
     FILE *out_file = std::fopen(out_file_path.string().c_str(), "wb");
+
+    if (out_file == NULL) throw std::runtime_error(
+        std::format("Failed to open file {}.", out_file_path.string())
+    );
 
     unsigned int dictionary_size = dictionary.size();
     fwrite(&dictionary_size, sizeof(dictionary_size), 1, out_file);
@@ -156,6 +189,11 @@ void construct_inverted_blocks(
 
     for (auto &token_stream : token_streams) {
         FILE *fp = std::fopen(token_stream.string().c_str(), "rb");
+
+        if (fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", token_stream.string())
+        );
+
         while (build_partial_index(
             fp,
             mem_limit,

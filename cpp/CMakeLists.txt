@@ -71,10 +71,10 @@ target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
 add_executable(file_io_tests tests/utils/file_io_tests.cpp)
 target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
-# add_executable(index_builder_tests tests/retrieval/index_builder_tests.cpp)
-# target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
+add_executable(index_builder_tests tests/retrieval/index_builder_tests.cpp)
+target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(vbe_tests)
 gtest_discover_tests(file_io_tests)
-# gtest_discover_tests(index_builder_tests)
+gtest_discover_tests(index_builder_tests)

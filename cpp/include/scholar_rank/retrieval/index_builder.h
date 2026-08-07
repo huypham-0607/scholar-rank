@@ -35,8 +35,14 @@ public:
     const PostingItem& operator[] (size_t idx) const;
 };
 
+bool read_token(
+    FILE* const token_stream,
+    unsigned long long* const ptr_doc_id,
+    std::string* const ptr_term
+);
+
 bool build_partial_index(
-    FILE* token_stream,
+    FILE* const token_stream,
     const size_t mem_limit,
     std::unordered_map<std::string, PostingList> &posting_list_mapping,
     std::vector<std::string> &dictionary
