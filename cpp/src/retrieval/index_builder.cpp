@@ -9,9 +9,9 @@
  * 
  */
 
-#include "scholar_rank/retrieval/index_builder.hpp"
-#include "scholar_rank/utils/vbe.hpp"
-#include "scholar_rank/utils/file_io.hpp"
+#include "scholar_rank/retrieval/index_builder.h"
+#include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/file_io.h"
 
 #include <algorithm>
 #include <string>
@@ -22,26 +22,20 @@
 #include <filesystem>
 #include <format>
 
-constexpr unsigned int MAX_TERM_LENGTH = 256;       // Might change depending on dataset
-constexpr unsigned int EST_UMAP_MEM_PER_ENTRY = 48; // Safe estimation of std::unordered_map mem usage per entry
-constexpr unsigned int TOKEN_STREAM_LIMIT = 10000;  // Max number of token streams accepted
-
-constexpr std::string BLOCK_PREFIX = "token_";
-
 namespace fs = std::filesystem;
 
 
-PostingItem::PostingItem(long long _doc_id, int _freq) : doc_id(_doc_id), freq(_freq) {}
+PostingItem::PostingItem(const long long _doc_id, const int _freq) : doc_id(_doc_id), freq(_freq) {}
 
 PostingList::PostingList() {
     list = std::vector<PostingItem>();
 }
 
-bool PostingList::has_document(long long doc_id) {
+bool PostingList::has_document(const long long doc_id) const {
     return (!list.empty() && list.back().doc_id == doc_id);
 }
 
-void PostingList::add_document(long long doc_id) {
+void PostingList::add_document(const long long doc_id) {
     // Assuming doc_id are monotonically increasing (ensured by token stream)
     if (list.empty() || list.back().doc_id != doc_id) {
         list.push_back(PostingItem(doc_id, 1));
@@ -51,7 +45,7 @@ void PostingList::add_document(long long doc_id) {
     }
 }
 
-size_t PostingList::size() {
+size_t PostingList::size() const {
     return list.size();
 }
 
@@ -155,7 +149,7 @@ void construct_inverted_blocks(
     std::unordered_map<std::string, PostingList> posting_list_mapping;
     std::vector<std::string> dictionary;
 
-    std::vector<fs::path> token_streams = globFiles(in_dir, "", ".bin");
+    std::vector<fs::path> token_streams = glob_files(in_dir, "", ".bin");
     sort(token_streams.begin(), token_streams.end());
 
     int partial_block_counter = 0;

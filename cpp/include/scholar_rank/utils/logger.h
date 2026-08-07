@@ -1,5 +1,5 @@
-#ifndef LOGGER_HPP
-#define LOGGER_HPP
+#ifndef LOGGER_H
+#define LOGGER_H
 
 #include <string>
 
@@ -14,9 +14,9 @@ public:
 
     Logger(std::string _file_name, Level _default_level);
 
-    void log(std::string message);
+    void log(std::string message) const;
 
-    void log(std::string message, Level log_level);
+    void log(std::string message, Level log_level) const;
 
 private:
     std::string file_name;

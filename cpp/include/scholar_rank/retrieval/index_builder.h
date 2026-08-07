@@ -1,5 +1,5 @@
-#ifndef INDEX_BUILDER_HPP
-#define INDEX_BUILDER_HPP
+#ifndef INDEX_BUILDER_H
+#define INDEX_BUILDER_H
 
 #include <cstdio>
 #include <vector>
@@ -7,11 +7,17 @@
 #include <filesystem>
 #include <unordered_map>
 
+constexpr unsigned int MAX_TERM_LENGTH = 256;       // Might change depending on dataset
+constexpr unsigned int EST_UMAP_MEM_PER_ENTRY = 48; // Safe estimation of std::unordered_map mem usage per entry
+constexpr unsigned int TOKEN_STREAM_LIMIT = 10000;  // Max number of token streams accepted
+
+constexpr std::string BLOCK_PREFIX = "token_";
+
 struct PostingItem {
     unsigned long long doc_id;
     unsigned int freq;
 
-    PostingItem(long long _doc_id, int _freq);
+    PostingItem(const long long _doc_id, const int _freq);
 };
 
 class PostingList {
@@ -20,11 +26,11 @@ private:
 public:
     PostingList();
 
-    bool has_document(long long doc_id);
+    bool has_document(const long long doc_id) const;
 
-    void add_document(long long doc_id);
+    void add_document(const long long doc_id);
 
-    size_t size();
+    size_t size() const;
 
     const PostingItem& operator[] (size_t idx) const;
 };

@@ -1,4 +1,4 @@
-#include "scholar_rank/utils/vbe.hpp"
+#include "scholar_rank/utils/vbe.h"
 
 #include <stdexcept>
 
@@ -17,7 +17,7 @@ size_t vbe_encode(unsigned long long num, unsigned char buffer[]) {
     return idx;
 }
 
-unsigned long long vbe_decode(unsigned char buffer[]) {
+unsigned long long vbe_decode(const unsigned char buffer[]) {
     unsigned long long decoded = 0;
     int idx = 0;
     while (idx < BUFFER_LIMIT) {

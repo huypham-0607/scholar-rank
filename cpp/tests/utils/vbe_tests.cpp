@@ -1,4 +1,4 @@
-#include "scholar_rank/utils/vbe.hpp"
+#include "scholar_rank/utils/vbe.h"
 
 #include <random>
 #include <gtest/gtest.h>
