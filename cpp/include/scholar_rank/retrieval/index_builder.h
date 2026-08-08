@@ -17,7 +17,7 @@ struct PostingItem {
     unsigned long long doc_id;
     unsigned int freq;
 
-    PostingItem(const long long _doc_id, const int _freq);
+    PostingItem(const long long _doc_id, const unsigned int _freq);
 };
 
 class PostingList {

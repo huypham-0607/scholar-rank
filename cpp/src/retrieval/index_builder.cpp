@@ -28,7 +28,7 @@ namespace fs = std::filesystem;
 // Compiler specific
 Logger logger(__FILE_NAME__, Logger::DEBUG);
 
-PostingItem::PostingItem(const long long _doc_id, const int _freq) : doc_id(_doc_id), freq(_freq) {}
+PostingItem::PostingItem(const long long _doc_id, const unsigned int _freq) : doc_id(_doc_id), freq(_freq) {}
 
 PostingList::PostingList() {
     list = std::vector<PostingItem>();
@@ -139,6 +139,24 @@ bool build_partial_index(
     return (dictionary.size() != 0);
 }
 
+/**
+ * @brief Write posting list to file.
+ * 
+ * Starts with a dictionary_size
+ * Format for each posting list:
+ * 
+ *       <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
+ * 
+ * - term_size:             unsigned short
+ * - posting_list_size:     unsigned int
+ * - term:                  char[]
+ * - vbe_encoding_{i}:      unsigned char[]
+ * - freq:                  unsigned int
+ * 
+ * @param out_file_path
+ * @param posting_list_mapping
+ * @param dictionary
+ */
 void write_partial_index(
     const fs::path out_file_path,
     std::unordered_map<std::string, PostingList>& posting_list_mapping,
@@ -168,6 +186,7 @@ void write_partial_index(
         for (int i = 0; i < posting_list_mapping[term].size(); i++) {
             PostingItem item = posting_list_mapping[term][i];
             unsigned long long delta = item.doc_id - last;
+            // logger.log(std::format("delta:{}",delta));
             int encode_length = vbe_encode(delta, vbe_buffer);
 
             fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file);

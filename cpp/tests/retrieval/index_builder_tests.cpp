@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/index_builder.h"
+#include "scholar_rank/utils/vbe.h"
 
 #include <random>
 #include <filesystem>
@@ -27,6 +28,8 @@ fs::path makeUniqueTempDir() {
     }
     throw std::runtime_error("could not create temp dir");
 }
+
+// HUGE TODO: FIX FILE DESCRIPTOR LEAK ACROSS ALL IMPLEMENTATIONS :SOB:
 
 namespace ReadTokenTest{
     class ReadTokenTest : public testing::Test {
@@ -359,7 +362,6 @@ namespace BuildPartialIndexTest {
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
-
         bool res;
 
         ASSERT_NO_THROW(
@@ -416,4 +418,362 @@ namespace BuildPartialIndexTest {
             ++idx;
         }
     }
+
+    TEST_F(BuildPartialIndexTest, EmptyStream) {
+        std::vector<std::pair<unsigned long long, std::string>> v;
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        create_stream(v, file_name);
+        
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+
+        ASSERT_NO_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ));
+        ASSERT_FALSE(res);
+    }
+
+    TEST_F(BuildPartialIndexTest, PartialDocId) {
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        unsigned int doc_id_4_bytes = 177013;
+        fwrite(&doc_id_4_bytes, sizeof(doc_id_4_bytes), 1, file_fp);
+
+        fclose(file_fp);
+        
+        file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+
+        ASSERT_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ), std::runtime_error);
+    }
+
+    TEST_F(BuildPartialIndexTest, PartialTermLength) {
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        unsigned long long valid_doc_id = 177013;
+        unsigned char term_length_1_bytes = 10;
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
+        fwrite(&term_length_1_bytes, sizeof(term_length_1_bytes), 1, file_fp);
+
+        fclose(file_fp);
+        
+        file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+
+        ASSERT_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ), std::runtime_error);
+    }
+
+    TEST_F(BuildPartialIndexTest, InvalidTermLength) {
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        unsigned long long valid_doc_id = 177013;
+        unsigned short invalid_term_length = (1<<10);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
+        fwrite(&invalid_term_length, sizeof(invalid_term_length), 1, file_fp);
+
+        fclose(file_fp);
+        
+        file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+
+        ASSERT_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ), std::runtime_error);
+    }
+    
+    TEST_F(BuildPartialIndexTest, PartialTermValue) {
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        unsigned long long valid_doc_id = 177013;
+        std::string term_value = "catmemes";
+        unsigned short valid_term_length = term_value.size();
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
+        fwrite(&valid_term_length, sizeof(valid_term_length), 1, file_fp);
+        fwrite(term_value.c_str(), sizeof(char), valid_term_length - 1, file_fp);
+
+        fclose(file_fp);
+        
+        file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+        
+        ASSERT_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ), std::runtime_error);
+    }
+
+    TEST_F(BuildPartialIndexTest, NullFilePointer) {
+        fs::path file_name = tmp_path / "token_stream.bin";
+        
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+        
+        ASSERT_THROW(res = build_partial_index(
+            file_fp,
+            (size_t) 2*(1<<20),
+            posting_list_mapping,
+            dictionary
+        ), std::runtime_error);
+    }
+
+    TEST_F(BuildPartialIndexTest, LowMemLimit) {
+        // Fabricate data
+        std::vector<std::pair<unsigned long long, std::string>> v;
+        for (int i = 0; i < 1000; i++){
+            v.push_back({33, std::format("maxverstappen{}",i)});
+        }
+
+        sort(v.begin(),v.end());
+
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        // Create stream at file_name
+        create_stream(v, file_name);
+        
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        bool res;
+
+        for (int i = 0; i < 3; i++){
+            ASSERT_NO_THROW(
+                res = build_partial_index(
+                    file_fp,
+                    (size_t)(1000),
+                    posting_list_mapping,
+                    dictionary
+                )
+            );
+            ASSERT_TRUE(res) << "i: " << i;
+            posting_list_mapping.clear();
+            dictionary.clear();
+        }
+
+        fclose(file_fp);
+    }
+
+    // TODO: Add Randomized Stress Test to BuildPartialIndexTest
+}
+
+namespace WritePartialIndexTest {
+    class WritePartialIndexTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+    };
+
+    TEST_F(WritePartialIndexTest, ValidInput) {
+        std::vector<std::pair<unsigned long long, std::string>> v;
+
+        fs::path file_name = tmp_path / "token_stream.bin";
+
+        v.push_back({33, "maxverstappen"});
+        v.push_back({33, "maxverstappen"});
+        v.push_back({33, "lewishamilton"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "k2y"});
+        v.push_back({(1LL<<48),"bignumber"});
+
+        sort(v.begin(),v.end());
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        
+        for (const auto& [doc_id, term] : v) {
+            posting_list_mapping[term].add_document(doc_id);
+            dictionary.push_back(term);
+        }
+
+        sort(dictionary.begin(), dictionary.end());
+        dictionary.resize(unique(dictionary.begin(),dictionary.end()) - dictionary.begin());
+        
+        ASSERT_NO_THROW(
+            write_partial_index(
+                file_name,
+                posting_list_mapping,
+                dictionary
+            )
+        );
+        
+        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+        if (file_fp == NULL) throw std::runtime_error(
+            std::format("Failed to open file {}.", file_name.string())
+        );
+
+        unsigned int dict_size;
+
+        int arg_count = fread(&dict_size, sizeof(dict_size), 1, file_fp);
+        ASSERT_EQ(arg_count, 1);
+        ASSERT_EQ(dict_size, dictionary.size());
+
+        for (const std::string term : dictionary) {
+            unsigned short term_size;
+            unsigned int posting_list_size;
+            std::string read_term;
+            unsigned long long offset = 0;
+            unsigned int freq;
+
+            size_t arg_count;
+            arg_count = fread(&term_size, sizeof(term_size), 1, file_fp);
+            ASSERT_EQ(arg_count, 1);
+            ASSERT_EQ(term_size, term.size());
+
+            arg_count = fread(&posting_list_size, sizeof(posting_list_size), 1, file_fp);
+            ASSERT_EQ(arg_count, 1);
+            ASSERT_EQ(posting_list_size, posting_list_mapping[term].size());
+
+            read_term.resize(term_size);
+            arg_count = fread(&read_term[0], sizeof(char), term_size, file_fp);
+            ASSERT_EQ(arg_count, term_size);
+            ASSERT_EQ(read_term, term);
+
+            unsigned char buffer[8];
+            for (int idx = 0; idx < posting_list_mapping[term].size(); idx++) {
+                bool res = read_vbe(file_fp, buffer);
+                ASSERT_TRUE(res);
+
+                unsigned long long delta;
+                ASSERT_NO_THROW(delta = vbe_decode(buffer));
+                offset += delta;
+                ASSERT_EQ(offset, posting_list_mapping[term][idx].doc_id);
+                
+                arg_count = fread(&freq, sizeof(freq), 1, file_fp);
+                ASSERT_EQ(arg_count, 1);
+                ASSERT_EQ(freq, posting_list_mapping[term][idx].freq);
+            }
+        }
+
+        fclose(file_fp);
+    }
+
+    TEST_F(WritePartialIndexTest, InvalidPath) {
+        std::vector<std::pair<unsigned long long, std::string>> v;
+
+        // Since tmp_path is an empty folder
+        fs::path file_name = tmp_path / "meow" / "token_stream.bin";
+
+        v.push_back({33, "maxverstappen"});
+        v.push_back({33, "maxverstappen"});
+        v.push_back({33, "lewishamilton"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "y2k"});
+        v.push_back({2000, "k2y"});
+        v.push_back({(1LL<<48),"bignumber"});
+
+        sort(v.begin(),v.end());
+        std::unordered_map<std::string, PostingList> posting_list_mapping;
+        std::vector<std::string> dictionary;
+        
+        for (const auto& [doc_id, term] : v) {
+            posting_list_mapping[term].add_document(doc_id);
+            dictionary.push_back(term);
+        }
+
+        sort(dictionary.begin(), dictionary.end());
+        dictionary.resize(unique(dictionary.begin(),dictionary.end()) - dictionary.begin());
+        
+        for (const auto& [doc_id, term] : v) {
+            posting_list_mapping[term].add_document(doc_id);
+            dictionary.push_back(term);
+        }
+
+        sort(dictionary.begin(), dictionary.end());
+        dictionary.resize(unique(dictionary.begin(),dictionary.end()) - dictionary.begin());
+        
+        ASSERT_THROW(
+            write_partial_index(
+                file_name,
+                posting_list_mapping,
+                dictionary
+            ), std::runtime_error
+        );
+    }
+
+    // TODO: Add Randomized Stress Test to WritePartialIndexTest
 }
