@@ -40,6 +40,7 @@ bool PostingList::has_document(const long long doc_id) const {
 
 void PostingList::add_document(const long long doc_id) {
     // Assuming doc_id are monotonically increasing (ensured by token stream)
+    // This is to ensure constant time complexity
     if (list.empty() || list.back().doc_id != doc_id) {
         list.push_back(PostingItem(doc_id, 1));
     }
@@ -111,6 +112,9 @@ bool build_partial_index(
     std::unordered_map<std::string, PostingList> &posting_list_mapping,
     std::vector<std::string> &dictionary
 ) {
+    if (token_stream == NULL) {
+        throw std::runtime_error("Invalid token stream.");
+    }
     size_t mem_usage = 0;
 
     unsigned long long cur_doc_id; 

@@ -209,7 +209,6 @@ TEST_F(GlobFilesTest, RandomWithPrefix) {
                 ASSERT_EQ(query, expected[i][j]);
             }
         }
-
         for (const auto& entry : fs::directory_iterator(tmp_path)) {
             if (entry.is_regular_file()) {
                 fs::remove(entry.path());
