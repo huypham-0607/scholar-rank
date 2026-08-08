@@ -1,6 +1,7 @@
 #ifndef INDEX_BUILDER_H
 #define INDEX_BUILDER_H
 
+#include "scholar_rank/utils/file_io.h"
 #include <cstdio>
 #include <vector>
 #include <string>
@@ -36,13 +37,13 @@ public:
 };
 
 bool read_token(
-    FILE* const token_stream,
+    const SafeFile& token_stream,
     unsigned long long* const ptr_doc_id,
     std::string* const ptr_term
 );
 
 bool build_partial_index(
-    FILE* const token_stream,
+    const SafeFile& token_stream,
     const size_t mem_limit,
     std::unordered_map<std::string, PostingList> &posting_list_mapping,
     std::vector<std::string> &dictionary

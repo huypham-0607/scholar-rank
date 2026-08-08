@@ -1,5 +1,6 @@
 #include "scholar_rank/retrieval/index_builder.h"
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/file_io.h"
 
 #include <random>
 #include <filesystem>
@@ -55,25 +56,16 @@ namespace ReadTokenTest{
 
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
         
         for (int i = 0; i < v.size(); i++){
-            fwrite(&v[i].first, sizeof(v[i].first), 1, file_fp);
+            fwrite(&v[i].first, sizeof(v[i].first), 1, file_fp.get());
             unsigned short term_length = v[i].second.size();
-            fwrite(&term_length, sizeof(term_length), 1, file_fp);
-            fwrite(v[i].second.c_str(), sizeof(char), term_length, file_fp);
+            fwrite(&term_length, sizeof(term_length), 1, file_fp.get());
+            fwrite(v[i].second.c_str(), sizeof(char), term_length, file_fp.get());
         }
 
-        fclose(file_fp);
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -96,17 +88,9 @@ namespace ReadTokenTest{
     TEST_F(ReadTokenTest, EmptyStream) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
-
-        fclose(file_fp);
+        SafeFile file_fp(file_name, "wb");
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -119,20 +103,12 @@ namespace ReadTokenTest{
     TEST_F(ReadTokenTest, PartialDocId) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned int doc_id_4_bytes = 177013;
-        fwrite(&doc_id_4_bytes, sizeof(doc_id_4_bytes), 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&doc_id_4_bytes, sizeof(doc_id_4_bytes), 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -144,22 +120,14 @@ namespace ReadTokenTest{
     TEST_F(ReadTokenTest, PartialTermLength) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         unsigned char term_length_1_bytes = 10;
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&term_length_1_bytes, sizeof(term_length_1_bytes), 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&term_length_1_bytes, sizeof(term_length_1_bytes), 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -171,22 +139,14 @@ namespace ReadTokenTest{
     TEST_F(ReadTokenTest, InvalidTermLength) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         unsigned short invalid_term_length = (1<<10);
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&invalid_term_length, sizeof(invalid_term_length), 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&invalid_term_length, sizeof(invalid_term_length), 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -198,36 +158,16 @@ namespace ReadTokenTest{
     TEST_F(ReadTokenTest, PartialTermValue) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         std::string term_value = "catmemes";
         unsigned short valid_term_length = term_value.size();
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&valid_term_length, sizeof(valid_term_length), 1, file_fp);
-        fwrite(term_value.c_str(), sizeof(char), valid_term_length - 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&valid_term_length, sizeof(valid_term_length), 1, file_fp.get());
+        fwrite(term_value.c_str(), sizeof(char), valid_term_length - 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
-
-        unsigned long long doc_id;
-        std::string buffer;
-        bool res;
-
-        ASSERT_THROW(res = read_token(file_fp, &doc_id, &buffer), std::runtime_error);
-    }
-
-    TEST_F(ReadTokenTest, NullFilePointer) {
-        fs::path file_name = tmp_path / "token_stream.bin";
-        
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+        file_fp = SafeFile(file_name.string().c_str(), "rb");
 
         unsigned long long doc_id;
         std::string buffer;
@@ -257,20 +197,14 @@ namespace BuildPartialIndexTest {
             const std::vector<std::pair<unsigned long long, std::string>>& v,
             fs::path file_name
         ) {
-            FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-
-            if (file_fp == NULL) throw std::runtime_error(
-                std::format("Failed to open file {}.", file_name.string())
-            );
+            SafeFile file_fp(file_name, "wb");
 
             for (int i = 0; i < v.size(); i++){
-                fwrite(&v[i].first, sizeof(v[i].first), 1, file_fp);
+                fwrite(&v[i].first, sizeof(v[i].first), 1, file_fp.get());
                 unsigned short term_length = v[i].second.size();
-                fwrite(&term_length, sizeof(term_length), 1, file_fp);
-                fwrite(v[i].second.c_str(), sizeof(char), term_length, file_fp);
+                fwrite(&term_length, sizeof(term_length), 1, file_fp.get());
+                fwrite(v[i].second.c_str(), sizeof(char), term_length, file_fp.get());
             }
-
-            fclose(file_fp);
         }
     };
 
@@ -289,10 +223,7 @@ namespace BuildPartialIndexTest {
         // Create stream at file_name
         create_stream(v, file_name);
         
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -355,10 +286,7 @@ namespace BuildPartialIndexTest {
         // Create stream at file_name
         create_stream(v, file_name);
         
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -425,10 +353,7 @@ namespace BuildPartialIndexTest {
 
         create_stream(v, file_name);
         
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -446,20 +371,12 @@ namespace BuildPartialIndexTest {
     TEST_F(BuildPartialIndexTest, PartialDocId) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned int doc_id_4_bytes = 177013;
-        fwrite(&doc_id_4_bytes, sizeof(doc_id_4_bytes), 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&doc_id_4_bytes, sizeof(doc_id_4_bytes), 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -476,22 +393,14 @@ namespace BuildPartialIndexTest {
     TEST_F(BuildPartialIndexTest, PartialTermLength) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         unsigned char term_length_1_bytes = 10;
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&term_length_1_bytes, sizeof(term_length_1_bytes), 1, file_fp);
-
-        fclose(file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&term_length_1_bytes, sizeof(term_length_1_bytes), 1, file_fp.get());
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -508,22 +417,15 @@ namespace BuildPartialIndexTest {
     TEST_F(BuildPartialIndexTest, InvalidTermLength) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         unsigned short invalid_term_length = (1<<10);
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&invalid_term_length, sizeof(invalid_term_length), 1, file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&invalid_term_length, sizeof(invalid_term_length), 1, file_fp.get());
 
-        fclose(file_fp);
         
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        file_fp = SafeFile(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -540,41 +442,16 @@ namespace BuildPartialIndexTest {
     TEST_F(BuildPartialIndexTest, PartialTermValue) {
         fs::path file_name = tmp_path / "token_stream.bin";
 
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "wb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "wb");
 
         unsigned long long valid_doc_id = 177013;
         std::string term_value = "catmemes";
         unsigned short valid_term_length = term_value.size();
-        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp);
-        fwrite(&valid_term_length, sizeof(valid_term_length), 1, file_fp);
-        fwrite(term_value.c_str(), sizeof(char), valid_term_length - 1, file_fp);
+        fwrite(&valid_doc_id, sizeof(valid_doc_id), 1, file_fp.get());
+        fwrite(&valid_term_length, sizeof(valid_term_length), 1, file_fp.get());
+        fwrite(term_value.c_str(), sizeof(char), valid_term_length - 1, file_fp.get());
 
-        fclose(file_fp);
-        
-        file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
-
-        std::unordered_map<std::string, PostingList> posting_list_mapping;
-        std::vector<std::string> dictionary;
-        bool res;
-        
-        ASSERT_THROW(res = build_partial_index(
-            file_fp,
-            (size_t) 2*(1<<20),
-            posting_list_mapping,
-            dictionary
-        ), std::runtime_error);
-    }
-
-    TEST_F(BuildPartialIndexTest, NullFilePointer) {
-        fs::path file_name = tmp_path / "token_stream.bin";
-        
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
+        file_fp = SafeFile(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -602,10 +479,7 @@ namespace BuildPartialIndexTest {
         // Create stream at file_name
         create_stream(v, file_name);
         
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "rb");
 
         std::unordered_map<std::string, PostingList> posting_list_mapping;
         std::vector<std::string> dictionary;
@@ -624,8 +498,6 @@ namespace BuildPartialIndexTest {
             posting_list_mapping.clear();
             dictionary.clear();
         }
-
-        fclose(file_fp);
     }
 
     // TODO: Add Randomized Stress Test to BuildPartialIndexTest
@@ -680,14 +552,11 @@ namespace WritePartialIndexTest {
             )
         );
         
-        FILE* file_fp = std::fopen(file_name.string().c_str(), "rb");
-        if (file_fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", file_name.string())
-        );
+        SafeFile file_fp(file_name, "rb");
 
         unsigned int dict_size;
 
-        int arg_count = fread(&dict_size, sizeof(dict_size), 1, file_fp);
+        int arg_count = fread(&dict_size, sizeof(dict_size), 1, file_fp.get());
         ASSERT_EQ(arg_count, 1);
         ASSERT_EQ(dict_size, dictionary.size());
 
@@ -699,22 +568,22 @@ namespace WritePartialIndexTest {
             unsigned int freq;
 
             size_t arg_count;
-            arg_count = fread(&term_size, sizeof(term_size), 1, file_fp);
+            arg_count = fread(&term_size, sizeof(term_size), 1, file_fp.get());
             ASSERT_EQ(arg_count, 1);
             ASSERT_EQ(term_size, term.size());
 
-            arg_count = fread(&posting_list_size, sizeof(posting_list_size), 1, file_fp);
+            arg_count = fread(&posting_list_size, sizeof(posting_list_size), 1, file_fp.get());
             ASSERT_EQ(arg_count, 1);
             ASSERT_EQ(posting_list_size, posting_list_mapping[term].size());
 
             read_term.resize(term_size);
-            arg_count = fread(&read_term[0], sizeof(char), term_size, file_fp);
+            arg_count = fread(&read_term[0], sizeof(char), term_size, file_fp.get());
             ASSERT_EQ(arg_count, term_size);
             ASSERT_EQ(read_term, term);
 
             unsigned char buffer[8];
             for (int idx = 0; idx < posting_list_mapping[term].size(); idx++) {
-                bool res = read_vbe(file_fp, buffer);
+                bool res = read_vbe(file_fp.get(), buffer);
                 ASSERT_TRUE(res);
 
                 unsigned long long delta;
@@ -722,13 +591,11 @@ namespace WritePartialIndexTest {
                 offset += delta;
                 ASSERT_EQ(offset, posting_list_mapping[term][idx].doc_id);
                 
-                arg_count = fread(&freq, sizeof(freq), 1, file_fp);
+                arg_count = fread(&freq, sizeof(freq), 1, file_fp.get());
                 ASSERT_EQ(arg_count, 1);
                 ASSERT_EQ(freq, posting_list_mapping[term][idx].freq);
             }
         }
-
-        fclose(file_fp);
     }
 
     TEST_F(WritePartialIndexTest, InvalidPath) {

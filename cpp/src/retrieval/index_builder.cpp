@@ -77,44 +77,37 @@ const PostingItem& PostingList::operator[] (size_t idx) const {
  * @return false 
  */
 bool read_token(
-    FILE* const token_stream,
+    const SafeFile& token_stream,
     unsigned long long* const ptr_doc_id,
     std::string* const ptr_term
 ) {
-    if (token_stream == NULL) {
-        throw std::runtime_error("Invalid token stream.");
-    }
-
-    long initial_pos = ftell(token_stream);
-    int arg_count = fread(ptr_doc_id, sizeof(*ptr_doc_id), 1, token_stream);
+    long initial_pos = ftell(token_stream.get());
+    int arg_count = fread(ptr_doc_id, sizeof(*ptr_doc_id), 1, token_stream.get());
     if (arg_count != 1) {
-        long bytes_read = ftell(token_stream) - initial_pos;
+        long bytes_read = ftell(token_stream.get()) - initial_pos;
         if (bytes_read == 0) return false;
         throw std::runtime_error("I/O error reading doc_id.");
     }
 
     unsigned short term_size;
-    arg_count = fread(&term_size, sizeof(term_size), 1, token_stream);;
+    arg_count = fread(&term_size, sizeof(term_size), 1, token_stream.get());
     if (arg_count != 1) throw std::runtime_error("I/O error reading term_size.");
     
     if (term_size > MAX_TERM_LENGTH) throw std::runtime_error("Erroneous term_size.");
     ptr_term->resize(term_size);
 
-    arg_count = fread(&(*ptr_term)[0], sizeof(char), term_size, token_stream);
+    arg_count = fread(&(*ptr_term)[0], sizeof(char), term_size, token_stream.get());
     if (arg_count != term_size) throw std::runtime_error("I/O error reading term_value.");
 
     return true;
 }
 
 bool build_partial_index(
-    FILE* const token_stream,
+    const SafeFile& token_stream,
     const size_t mem_limit,
     std::unordered_map<std::string, PostingList> &posting_list_mapping,
     std::vector<std::string> &dictionary
 ) {
-    if (token_stream == NULL) {
-        throw std::runtime_error("Invalid token stream.");
-    }
     size_t mem_usage = 0;
 
     unsigned long long cur_doc_id; 
@@ -162,24 +155,20 @@ void write_partial_index(
     std::unordered_map<std::string, PostingList>& posting_list_mapping,
     std::vector<std::string>& dictionary
 ) {
-    FILE *out_file = std::fopen(out_file_path.string().c_str(), "wb");
-
-    if (out_file == NULL) throw std::runtime_error(
-        std::format("Failed to open file {}.", out_file_path.string())
-    );
+    SafeFile out_file(out_file_path, "wb");
 
     unsigned int dictionary_size = dictionary.size();
-    fwrite(&dictionary_size, sizeof(dictionary_size), 1, out_file);
+    fwrite(&dictionary_size, sizeof(dictionary_size), 1, out_file.get());
 
     unsigned char vbe_buffer[8];
     for (std::string term : dictionary) {
         unsigned short term_size = term.size();                                 // 2 bytes
         unsigned int posting_list_size = posting_list_mapping[term].size();     // 4 bytes should be sufficient
         
-        fwrite(&term_size, sizeof(term_size), 1, out_file);
-        fwrite(&posting_list_size, sizeof(posting_list_size), 1, out_file);
+        fwrite(&term_size, sizeof(term_size), 1, out_file.get());
+        fwrite(&posting_list_size, sizeof(posting_list_size), 1, out_file.get());
         
-        fwrite(term.c_str(), sizeof(char), term.size(), out_file);
+        fwrite(term.c_str(), sizeof(char), term.size(), out_file.get());
 
         // VBE encoding
         unsigned long long last = 0;
@@ -189,12 +178,10 @@ void write_partial_index(
             // logger.log(std::format("delta:{}",delta));
             int encode_length = vbe_encode(delta, vbe_buffer);
 
-            fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file);
-            fwrite(&item.freq, sizeof(item.freq), 1, out_file);
+            fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
+            fwrite(&item.freq, sizeof(item.freq), 1, out_file.get());
         }
     }
-
-    fclose(out_file);
 }
 
 void construct_inverted_blocks(
@@ -211,11 +198,7 @@ void construct_inverted_blocks(
     int partial_block_counter = 0;
 
     for (auto &token_stream : token_streams) {
-        FILE *fp = std::fopen(token_stream.string().c_str(), "rb");
-
-        if (fp == NULL) throw std::runtime_error(
-            std::format("Failed to open file {}.", token_stream.string())
-        );
+        SafeFile fp(token_stream, "rb");
 
         while (build_partial_index(
             fp,
@@ -233,6 +216,11 @@ void construct_inverted_blocks(
             posting_list_mapping.clear();
             dictionary.clear();
         }
-        fclose(fp);
     }
+}
+
+void merge_inverted_blocks(
+
+) {
+
 }
