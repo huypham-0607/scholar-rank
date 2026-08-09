@@ -13,7 +13,6 @@ namespace fs = std::filesystem;
 class SafeFile{
 public:
     SafeFile(const fs::path& path, const char* mode);
-    SafeFile(const char* const path, const char* mode);
     ~SafeFile();
 
     SafeFile(const SafeFile&) = delete;
@@ -22,9 +21,21 @@ public:
     SafeFile& operator=(SafeFile&& other) noexcept;
 
     FILE* get() const noexcept;
+    bool fread(
+        void* const buffer,
+        const std::size_t size,
+        const std::size_t count,
+        const bool throw_on_eof = true
+    );
+    bool fwrite(
+        void* const buffer,
+        const std::size_t size,
+        const std::size_t count
+    );
     void close();
 private:
     FILE* fp;
+    fs::path file_path;
 };
 
 /**

@@ -135,7 +135,7 @@ bool build_partial_index(
 /**
  * @brief Write posting list to file.
  * 
- * Starts with a dictionary_size
+ * Starts with a dictionary_size <unsigned int>
  * Format for each posting list:
  * 
  *       <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
@@ -239,6 +239,16 @@ void write_doc_len_entry(
     ));
 }
 
+
+/**
+ * @brief Construct doc_id - doc_len sequence
+ * 
+ * Format: (doc_id<vbe_encoding>)(doc_len<unsigned char>)
+ * 
+ * @param in_dir 
+ * @param out_dir 
+ */
+
 void construct_doc_len_list(
     const fs::path& in_dir,
     const fs::path& out_dir
@@ -280,6 +290,47 @@ void construct_doc_len_list(
     }
 }
 
+bool read_doc_len_entry(
+    const SafeFile& in_file,
+    unsigned long long* const ptr_offset,
+    unsigned char* const ptr_freq
+) {
+    size_t arg_count;
+    long initial_pos = ftell(in_file.get());
+
+    unsigned char buffer[8];
+    bool res = read_vbe(in_file.get(), buffer);
+
+    if (!res) {
+        long bytes_read = ftell(in_file.get()) - initial_pos;
+        if (bytes_read == 0) return false;
+        throw std::runtime_error(std::format(
+            "Error while reading doc_len entry."
+        ));
+    }
+    (*ptr_offset) = vbe_decode(buffer);
+
+    arg_count = fread(ptr_freq, sizeof(*ptr_freq), 1, in_file.get());
+    if (arg_count != 1) throw std::runtime_error(std::format(
+        "Error while reading doc_len entry."
+    ));
+    return true;
+}
+
+void read_doc_len_list(
+    const fs::path& in_dir,
+    std::vector<unsigned char>& doc_len_list
+) {
+    SafeFile in_file(in_dir,"rb");
+    unsigned long long doc_id = 0;
+    unsigned long long delta;
+    unsigned char freq;
+    while (read_doc_len_entry(in_file, &delta, &freq)) {
+        doc_id += delta;
+        doc_len_list.resize(std::max((size_t)doc_id + 1, doc_len_list.size()), 0);
+        doc_len_list[doc_id] = freq;
+    }
+}
 
 /**
  * @brief Merging partial posting blocks, into a final complete posting list.
@@ -299,14 +350,165 @@ void construct_doc_len_list(
  * - w(t,d) is tf(term,doc)(k+1) / tf(term,doc) + k (1-b+b(|d|/avgdl)).
  * 
  * For each posting list, we have to compute
- * - 
+ * -
  * 
  * @param in_dir 
  * @param out_dir 
  */
-void merge_inverted_blocks(
-    const fs::path& in_dir,
-    const fs::path& out_dir
-) {
 
+
+// <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
+
+class Stream {
+public:
+    Stream(const fs::path in_path) : in_file(SafeFile(in_path, "rb")) {
+        is_empty = false;
+
+        in_file.fread(&dict_size, sizeof(dict_size), 1);
+        if (dict_size == 0) {
+            is_empty = true;
+        }
+        else {
+            list_id = 0;
+
+            // Setting up first posting_list
+            unsigned short term_size;
+            in_file.fread(&term_size, sizeof(term_size), 1);
+            in_file.fread(&list_size, sizeof(list_size), 1);
+            term.clear(); term.resize(term_size);
+            in_file.fread(&(term[0]), sizeof(char), term_size);
+
+            // Setting up first posting_item (posting list should be non-empty)
+            item_id = 0;
+            doc_id = 0;
+            unsigned char buffer[BUFFER_LIMIT];
+            read_vbe(in_file.get(), buffer);
+            doc_id += vbe_decode(buffer);
+            in_file.fread(&freq, sizeof(freq), 1);
+        }
+    }
+
+    bool empty() const {
+        return is_empty;
+    }
+
+    PostingItem get_item() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing item in an empty Stream"
+            ));
+        }
+        return PostingItem(doc_id, freq);
+    }
+
+    unsigned int get_item_id() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing item_id in an empty Stream"
+            ));
+        }
+        return item_id;
+    }
+
+    unsigned int get_list_size() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing list_size in an empty Stream"
+            ));
+        }
+        return list_size;
+    }
+
+    std::string get_term() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing term in an empty Stream"
+            ));
+        }
+        return term;
+    }
+
+    unsigned int get_list_id() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing list_id in an empty Stream"
+            ));
+        }
+        return list_id;
+    }
+
+    unsigned int get_dict_size() const {
+        return dict_size;
+    }
+
+    /*
+     * Returns true if next item is available (not empty).
+     */
+    bool next() {
+        if (is_empty) return false;
+        ++item_id;
+        if (item_id == list_size) {
+            ++list_id;
+            if (list_id == dict_size) {
+                is_empty = true;
+                return false;
+            }
+
+            unsigned short term_size;
+            in_file.fread(&term_size, sizeof(term_size), 1);
+            in_file.fread(&list_size, sizeof(list_size), 1);
+            term.clear(); term.resize(term_size);
+            in_file.fread(&(term[0]), sizeof(char), term_size);
+
+            item_id = 0;
+            doc_id = 0;
+        }
+
+        unsigned char buffer[BUFFER_LIMIT];
+        read_vbe(in_file.get(), buffer);
+        doc_id += vbe_decode(buffer);
+        in_file.fread(&freq, sizeof(freq), 1);
+        return true;
+    }
+
+private:
+    SafeFile in_file;
+    bool is_empty;
+    unsigned int dict_size;
+
+    unsigned int list_id;
+    unsigned int list_size;
+    std::string term;
+
+    unsigned int item_id;
+    unsigned long long doc_id;
+    unsigned int freq;
+};
+
+void merge_inverted_blocks(
+    const fs::path& doc_len_dir,
+    const fs::path& in_dir,
+    const fs::path& out_dir,
+    const int block_size = 128
+) {
+    std::vector<unsigned char> doc_len_list;
+
+    read_doc_len_list(doc_len_dir, doc_len_list);
+
+    unsigned long long total_doc_length = 0;
+
+    // Assuming doc_ids are mapped to [0,N)
+    for (unsigned long long i = 0; i < doc_len_list.size(); i++) {
+        total_doc_length += doc_len_list[i];
+    }
+
+    long double avgdl = (long double)total_doc_length/doc_len_list.size();
+
+    std::vector<fs::path> in_paths = glob_files(in_dir, "", ".bin");
+    sort(in_paths.begin(), in_paths.end());
+
+    std::vector<SafeFile> streams;
+    for (fs::path in_path : in_paths) {
+        streams.push_back(SafeFile(in_path, "rb"));
+    }    
 }

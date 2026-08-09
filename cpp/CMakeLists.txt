@@ -61,6 +61,10 @@ target_include_directories(scholar_rank_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Adding CLI entry points (apps/)
+add_executable(build_inverted_blocks apps/build_inverted_blocks.cpp)
+target_link_libraries(build_inverted_blocks PRIVATE scholar_rank_core)
+
 # Adding tests
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
 FetchContent_MakeAvailable(googletest)
