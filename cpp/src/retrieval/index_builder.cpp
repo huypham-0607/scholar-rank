@@ -219,8 +219,95 @@ void construct_inverted_blocks(
     }
 }
 
-void merge_inverted_blocks(
+void write_doc_len_entry(
+    const SafeFile& out_fp,
+    const unsigned long long& delta,
+    const unsigned char& freq
+) {
+    // This depends on assertion that freq (from OpenAlex) never exceed (1<<8)
+    unsigned char buffer[8];
+    size_t encode_len = vbe_encode(delta, buffer);
+    size_t arg_count;
+    arg_count = fwrite(buffer, sizeof(unsigned char), encode_len, out_fp.get());
+    if (arg_count != encode_len) throw std::runtime_error(std::format(
+        "Error while writing doc_len entry."
+    ));
+    arg_count = fwrite(&freq, sizeof(freq), 1, out_fp.get());
+    if (arg_count != 1) throw std::runtime_error(std::format(
+        "Error while writing doc_len entry."
+    ));
+}
 
+void construct_doc_len_list(
+    const fs::path& in_dir,
+    const fs::path& out_dir
+) {
+    std::vector<fs::path> token_streams = glob_files(in_dir, "", ".bin");
+    sort(token_streams.begin(), token_streams.end());
+
+    fs::path out_file_path = out_dir / "doc_len_table.bin"; 
+
+    SafeFile out_fp(out_file_path, "wb");
+
+    bool has_started = false;
+
+    unsigned long long delta = 0;
+    unsigned long long prev_doc_id = 0;
+    unsigned char running_freq = 0;
+    for (auto &token_stream : token_streams) {
+        SafeFile fp(token_stream, "rb");
+        unsigned long long cur_doc_id = 0;
+        std::string term;
+
+        while (read_token(fp, &cur_doc_id, &term)) {
+            if (!has_started || cur_doc_id != prev_doc_id) {
+                if (has_started) {
+                    write_doc_len_entry(out_fp, delta, running_freq);
+                }
+                has_started = true;
+                delta = cur_doc_id - prev_doc_id;
+                prev_doc_id = cur_doc_id;
+                running_freq = 0;
+            }
+            ++running_freq;
+        }
+    }
+
+    // Adding last element.
+    if (has_started) {
+        write_doc_len_entry(out_fp, delta, running_freq);
+    }
+
+}
+
+
+
+/**
+ * @brief Merging partial posting blocks, into a final complete posting list.
+ * 
+ * Each posting (1 single term) will be treated as an atomic unit. We will
+ * group these posting units into blocks of certain sizes.
+ * 
+ * Maintain a separate look-up list storing (file_id, position) tuple for fast
+ * querying.
+ * 
+ * To remind, Standard BM25 implementation is:
+ * 
+ *  - log(N/df(Term)) * tf(term,doc)(k+1) / tf(term,doc) + k (1-b+b(|d|/avgdl))
+ * 
+ * For WAND scoring function \alpha_{t} * w(t,d)
+ * - \alpha_{t} is our IDF (log(N/df(Term)))
+ * - w(t,d) is tf(term,doc)(k+1) / tf(term,doc) + k (1-b+b(|d|/avgdl)).
+ * 
+ * For each posting list, we have to compute
+ * - 
+ * 
+ * @param in_dir 
+ * @param out_dir 
+ */
+void merge_inverted_blocks(
+    const fs::path& in_dir,
+    const fs::path& out_dir
 ) {
 
 }

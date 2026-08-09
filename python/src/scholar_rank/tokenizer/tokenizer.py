@@ -20,24 +20,69 @@ class Tokenizer:
         self,
         db_path: Path,
         out_path: Path,
+        lookup_out_path: Path,
         row_per_chunk: int = (1<<18),
         chunk_per_file: int = (1<<8)
     ):
         self.STOP_WORD_LIST = r"\b(i|me|my|myself|we|our|ours|ourselves|you|your|yours|yourself|yourselves|he|him|his|himself|she|her|hers|herself|it|its|itself|they|them|their|theirs|themselves|what|which|who|whom|this|that|these|those|am|is|are|was|were|be|been|being|have|has|had|having|do|does|did|doing|a|an|the|and|but|if|or|because|as|until|while|of|at|by|for|with|about|against|between|into|through|during|before|after|above|below|to|from|up|down|in|out|on|off|over|under|again|further|then|once|here|there|when|where|why|how|all|any|both|each|few|more|most|other|some|such|no|nor|not|only|own|same|so|than|too|very|s|t|can|will|just|don|should|now)\b"
         self.DB_PATH = db_path
         self.OUT_PATH = out_path
+        self.LOOKUP_OUT_PATH = lookup_out_path
         self.ROW_PER_CHUNK = row_per_chunk
         self.CHUNK_PER_FILE = chunk_per_file
+
+    def build_doc_id_lookup(self, con):
+        """Rank raw_id (OpenAlex numeric id) into a dense mapped_id in [0,N).
+
+        raw_id is sparse and can exceed int32, so downstream structures
+        (posting lists, doc lengths, graph adjacency) index by mapped_id
+        instead, giving them O(1) flat-array access. Writes the
+        raw_id <-> mapped_id table to LOOKUP_OUT_PATH/doc_id_lookup.bin and
+        returns the mapping relation so callers can join against it.
+        """
+        logger.info(f"Building doc_id lookup table from {self.DB_PATH}.")
+
+        doc_id_map = con.sql(f"""
+            SELECT
+                id AS raw_id,
+                (ROW_NUMBER() OVER (ORDER BY id ASC) - 1)::INTEGER AS mapped_id
+            FROM (
+                SELECT regexp_replace(id, 'W', '')::BIGINT AS id
+                FROM read_parquet('{self.DB_PATH}/**/*.parquet')
+            )
+            ORDER BY raw_id ASC
+        """)
+
+        self.LOOKUP_OUT_PATH.mkdir(parents=True, exist_ok=True)
+        lookup_path = self.LOOKUP_OUT_PATH / "doc_id_lookup.bin"
+        logger.info(f"Writing doc_id lookup table to {lookup_path}.")
+
+        buf = io.BytesIO()
+        batch = doc_id_map.fetchmany(self.ROW_PER_CHUNK)
+        with open(lookup_path, "wb") as out_file:
+            while batch:
+                for raw_id, mapped_id in batch:
+                    buf.write(struct.pack('<qi', raw_id, mapped_id))
+
+                out_file.write(buf.getvalue())
+                buf.seek(0); buf.truncate()
+                batch = doc_id_map.fetchmany(self.ROW_PER_CHUNK)
+
+        logger.info(f"Finished writing doc_id lookup table ({lookup_path}).")
+        return doc_id_map
 
     def get_token(self):
         con = db.connect()
 
         logger.info(f"Start serializing corpus from {self.DB_PATH}.")
+
+        doc_id_map = self.build_doc_id_lookup(con)
+
         tokenized = con.sql(f"""
             INSTALL fts;
             LOAD fts;
             SELECT
-                regexp_replace(id, 'W', '')::BIGINT AS id,
+                m.mapped_id AS id,
                 list_transform(
                     regexp_extract_all(
                         regexp_replace(
@@ -58,6 +103,7 @@ class Tokenizer:
                     token -> stem(token,'english')
                 ) AS tokens
             FROM read_parquet('{self.DB_PATH}/**/*.parquet')
+            JOIN doc_id_map m ON regexp_replace(id, 'W', '')::BIGINT = m.raw_id
         """)
 
         token_stream = con.sql(f"""
@@ -104,13 +150,16 @@ class Tokenizer:
             file_count += 1
         logger.info(f"Finished serializing corpus from {self.DB_PATH}.")
 
-
 def main():
     DB_PATH = Path('/data')
-    
+
     label = 'math_english'
 
-    tokenizer = Tokenizer(DB_PATH/label, DB_PATH/label/"token_stream")
+    tokenizer = Tokenizer(
+        DB_PATH/label,
+        DB_PATH/label/"token_stream",
+        DB_PATH/label/"doc_id_lookup"
+    )
     tokenizer.get_token()
 
 if __name__ == "__main__":
