@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <fstream>
 #include <format>
+#include <cstdio>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -28,6 +30,125 @@ fs::path makeUniqueTempDir() {
         if (fs::create_directory(candidate, ec)) return candidate;
     }
     throw std::runtime_error("could not create temp dir");
+}
+
+namespace SafeFileTest {
+    class SafeFileTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+    };
+
+    TEST_F(SafeFileTest, ConstructWriteThenRead) {
+        fs::path file_name = tmp_path / "safe_file.bin";
+        std::string payload = "hello safefile";
+
+        {
+            SafeFile out_fp(file_name, "wb");
+            ASSERT_NE(out_fp.get(), nullptr);
+            size_t written = fwrite(payload.c_str(), sizeof(char), payload.size(), out_fp.get());
+            ASSERT_EQ(written, payload.size());
+        }
+
+        SafeFile in_fp(file_name, "rb");
+        std::string read_back(payload.size(), '\0');
+        size_t got = fread(&read_back[0], sizeof(char), payload.size(), in_fp.get());
+        ASSERT_EQ(got, payload.size());
+        ASSERT_EQ(read_back, payload);
+    }
+
+    TEST_F(SafeFileTest, ConstCharOverload) {
+        fs::path file_name = tmp_path / "safe_file.bin";
+
+        {
+            SafeFile out_fp(file_name.string().c_str(), "wb");
+            ASSERT_NE(out_fp.get(), nullptr);
+        }
+
+        SafeFile in_fp(file_name.string().c_str(), "rb");
+        ASSERT_NE(in_fp.get(), nullptr);
+    }
+
+    TEST_F(SafeFileTest, ThrowsOnMissingFile) {
+        fs::path file_name = tmp_path / "does_not_exist.bin";
+        ASSERT_THROW(SafeFile in_fp(file_name, "rb"), std::runtime_error);
+    }
+
+    TEST_F(SafeFileTest, ThrowsOnMissingParentDir) {
+        fs::path file_name = tmp_path / "missing_dir" / "safe_file.bin";
+        ASSERT_THROW(SafeFile out_fp(file_name, "wb"), std::runtime_error);
+    }
+
+    TEST_F(SafeFileTest, MoveConstructor) {
+        fs::path file_name = tmp_path / "safe_file.bin";
+        SafeFile original(file_name, "wb");
+        FILE* raw_fp = original.get();
+        ASSERT_NE(raw_fp, nullptr);
+
+        SafeFile moved(std::move(original));
+        ASSERT_EQ(moved.get(), raw_fp);
+        ASSERT_EQ(original.get(), nullptr);
+
+        unsigned char byte = 42;
+        size_t written = fwrite(&byte, sizeof(byte), 1, moved.get());
+        ASSERT_EQ(written, 1);
+    }
+
+    TEST_F(SafeFileTest, MoveAssignment) {
+        fs::path file_a = tmp_path / "a.bin";
+        fs::path file_b = tmp_path / "b.bin";
+
+        SafeFile dest(file_a, "wb");
+        {
+            SafeFile source(file_b, "wb");
+            dest = std::move(source);
+            ASSERT_EQ(source.get(), nullptr);
+        }
+
+        unsigned char byte = 7;
+        size_t written = fwrite(&byte, sizeof(byte), 1, dest.get());
+        ASSERT_EQ(written, 1);
+        dest.close();
+
+        // file_a (the previous handle) was closed by the move-assignment
+        // before anything was ever written to it, so it stays empty; the
+        // byte we wrote afterward should have landed in file_b instead.
+        ASSERT_EQ(fs::file_size(file_a), 0u);
+        ASSERT_EQ(fs::file_size(file_b), 1u);
+    }
+
+    TEST_F(SafeFileTest, CloseIsIdempotent) {
+        fs::path file_name = tmp_path / "safe_file.bin";
+        SafeFile fp(file_name, "wb");
+
+        ASSERT_NO_THROW(fp.close());
+        ASSERT_EQ(fp.get(), nullptr);
+        ASSERT_NO_THROW(fp.close());
+    }
+
+    TEST_F(SafeFileTest, DestructorFlushesAndCloses) {
+        fs::path file_name = tmp_path / "safe_file.bin";
+        std::string payload = "flushed on scope exit";
+
+        {
+            SafeFile fp(file_name, "wb");
+            fwrite(payload.c_str(), sizeof(char), payload.size(), fp.get());
+        } // destructor runs here; a leaked/unflushed handle would fail the read below
+
+        SafeFile check(file_name, "rb");
+        std::string read_back(payload.size(), '\0');
+        size_t got = fread(&read_back[0], sizeof(char), payload.size(), check.get());
+        ASSERT_EQ(got, payload.size());
+        ASSERT_EQ(read_back, payload);
+    }
 }
 
 class GlobFilesTest : public testing::Test {

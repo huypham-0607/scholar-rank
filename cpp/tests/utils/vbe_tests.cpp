@@ -1,10 +1,31 @@
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/file_io.h"
 
 #include <random>
+#include <vector>
+#include <filesystem>
+#include <unistd.h>
 #include <gtest/gtest.h>
+
+namespace fs = std::filesystem;
 
 unsigned long long rd(unsigned long long l, unsigned long long r, std::mt19937_64 &mt) {
     return std::uniform_int_distribution<unsigned long long> (l,r) (mt);
+}
+
+fs::path makeUniqueTempDir() {
+    fs::path base = fs::temp_directory_path();
+    for (int i = 0; i < 100; ++i) {
+        auto candidate = base / (
+            "gtest_" + std::to_string(::getpid())
+            + "_" + std::to_string(i)
+            + "_" + std::to_string(std::rand())
+        );
+        if (fs::exists(candidate)) continue;
+        std::error_code ec;
+        if (fs::create_directory(candidate, ec)) return candidate;
+    }
+    throw std::runtime_error("could not create temp dir");
 }
 
 TEST(VBETest, HandlesZero) {
@@ -80,8 +101,122 @@ TEST(VBETest, RandomInput) {
         size_t length = vbe_encode(val, buffer);
 
         ASSERT_EQ(length, expected_length);
-        
+
         unsigned long long decoded = vbe_decode(buffer);
         ASSERT_EQ(decoded, val);
     }
+}
+
+TEST(ReadVbeTest, ReadsSingleByteValue) {
+    fs::path tmp_path = makeUniqueTempDir();
+    fs::path file_name = tmp_path / "vbe_stream.bin";
+
+    unsigned char encode_buffer[8];
+    size_t encode_len = vbe_encode(5, encode_buffer);
+
+    {
+        SafeFile out_fp(file_name, "wb");
+        fwrite(encode_buffer, sizeof(unsigned char), encode_len, out_fp.get());
+    }
+
+    SafeFile in_fp(file_name, "rb");
+    unsigned char decode_buffer[8];
+    bool res = read_vbe(in_fp.get(), decode_buffer);
+
+    ASSERT_TRUE(res);
+    ASSERT_EQ(vbe_decode(decode_buffer), 5);
+
+    fs::remove_all(tmp_path);
+}
+
+TEST(ReadVbeTest, ReadsMultiByteValue) {
+    fs::path tmp_path = makeUniqueTempDir();
+    fs::path file_name = tmp_path / "vbe_stream.bin";
+
+    unsigned long long val = (1LL<<40) + 12345;
+    unsigned char encode_buffer[8];
+    size_t encode_len = vbe_encode(val, encode_buffer);
+
+    {
+        SafeFile out_fp(file_name, "wb");
+        fwrite(encode_buffer, sizeof(unsigned char), encode_len, out_fp.get());
+    }
+
+    SafeFile in_fp(file_name, "rb");
+    unsigned char decode_buffer[8];
+    bool res = read_vbe(in_fp.get(), decode_buffer);
+
+    ASSERT_TRUE(res);
+    ASSERT_EQ(vbe_decode(decode_buffer), val);
+
+    fs::remove_all(tmp_path);
+}
+
+TEST(ReadVbeTest, EmptyStreamReturnsFalse) {
+    fs::path tmp_path = makeUniqueTempDir();
+    fs::path file_name = tmp_path / "vbe_stream.bin";
+
+    { SafeFile out_fp(file_name, "wb"); }
+
+    SafeFile in_fp(file_name, "rb");
+    unsigned char decode_buffer[8];
+    bool res = read_vbe(in_fp.get(), decode_buffer);
+
+    ASSERT_FALSE(res);
+
+    fs::remove_all(tmp_path);
+}
+
+TEST(ReadVbeTest, TruncatedMidValueReturnsFalse) {
+    fs::path tmp_path = makeUniqueTempDir();
+    fs::path file_name = tmp_path / "vbe_stream.bin";
+
+    unsigned long long val = (1LL<<40) + 12345;
+    unsigned char encode_buffer[8];
+    size_t encode_len = vbe_encode(val, encode_buffer);
+    ASSERT_GT(encode_len, 1u);
+
+    {
+        // Write every byte except the terminator, so the stream ends
+        // mid-value with no continuation-bit-set byte ever written.
+        SafeFile out_fp(file_name, "wb");
+        fwrite(encode_buffer, sizeof(unsigned char), encode_len - 1, out_fp.get());
+    }
+
+    SafeFile in_fp(file_name, "rb");
+    unsigned char decode_buffer[8];
+    bool res = read_vbe(in_fp.get(), decode_buffer);
+
+    ASSERT_FALSE(res);
+
+    fs::remove_all(tmp_path);
+}
+
+TEST(ReadVbeTest, ReadsSequentialEntries) {
+    fs::path tmp_path = makeUniqueTempDir();
+    fs::path file_name = tmp_path / "vbe_stream.bin";
+
+    std::vector<unsigned long long> values = {0, 1, 127, 128, (1LL<<30)};
+
+    {
+        SafeFile out_fp(file_name, "wb");
+        unsigned char encode_buffer[8];
+        for (unsigned long long v : values) {
+            size_t encode_len = vbe_encode(v, encode_buffer);
+            fwrite(encode_buffer, sizeof(unsigned char), encode_len, out_fp.get());
+        }
+    }
+
+    SafeFile in_fp(file_name, "rb");
+    unsigned char decode_buffer[8];
+    for (unsigned long long v : values) {
+        bool res = read_vbe(in_fp.get(), decode_buffer);
+        ASSERT_TRUE(res);
+        ASSERT_EQ(vbe_decode(decode_buffer), v);
+    }
+
+    bool res = read_vbe(in_fp.get(), decode_buffer);
+    ASSERT_FALSE(res);
+
+    fs::remove_all(tmp_path);
 }

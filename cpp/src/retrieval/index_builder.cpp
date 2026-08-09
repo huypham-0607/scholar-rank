@@ -180,6 +180,7 @@ void write_partial_index(
 
             fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
             fwrite(&item.freq, sizeof(item.freq), 1, out_file.get());
+            last = item.doc_id;
         }
     }
 }
@@ -277,9 +278,7 @@ void construct_doc_len_list(
     if (has_started) {
         write_doc_len_entry(out_fp, delta, running_freq);
     }
-
 }
-
 
 
 /**

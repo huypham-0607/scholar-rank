@@ -61,4 +61,15 @@ void construct_inverted_blocks(
     const size_t mem_limit
 );
 
+void write_doc_len_entry(
+    const SafeFile& out_fp,
+    const unsigned long long& delta,
+    const unsigned char& freq
+);
+
+void construct_doc_len_list(
+    const std::filesystem::path& in_dir,
+    const std::filesystem::path& out_dir
+);
+
 #endif

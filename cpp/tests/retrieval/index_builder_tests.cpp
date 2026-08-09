@@ -8,6 +8,9 @@
 #include <cstdio>
 #include <stdexcept>
 #include <format>
+#include <map>
+#include <vector>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -30,7 +33,45 @@ fs::path makeUniqueTempDir() {
     throw std::runtime_error("could not create temp dir");
 }
 
-// HUGE TODO: FIX FILE DESCRIPTOR LEAK ACROSS ALL IMPLEMENTATIONS :SOB:
+namespace PostingListTest {
+    TEST(PostingListTest, EmptyListHasNoDocument) {
+        PostingList list;
+        ASSERT_FALSE(list.has_document(5));
+        ASSERT_EQ(list.size(), 0);
+    }
+
+    TEST(PostingListTest, AddDistinctDocuments) {
+        PostingList list;
+        list.add_document(3);
+        list.add_document(7);
+        list.add_document(7);
+        list.add_document(9);
+
+        ASSERT_EQ(list.size(), 3);
+        ASSERT_EQ(list[0].doc_id, 3); ASSERT_EQ(list[0].freq, 1);
+        ASSERT_EQ(list[1].doc_id, 7); ASSERT_EQ(list[1].freq, 2);
+        ASSERT_EQ(list[2].doc_id, 9); ASSERT_EQ(list[2].freq, 1);
+    }
+
+    TEST(PostingListTest, HasDocumentChecksLastInserted) {
+        // add_document assumes monotonically increasing doc_id input, so
+        // has_document only ever needs to check the last-inserted entry.
+        PostingList list;
+        list.add_document(3);
+        list.add_document(5);
+
+        ASSERT_TRUE(list.has_document(5));
+        ASSERT_FALSE(list.has_document(3));
+    }
+
+    TEST(PostingListTest, OperatorIndexThrowsOutOfRange) {
+        PostingList list;
+        list.add_document(1);
+
+        ASSERT_NO_THROW(list[0]);
+        ASSERT_THROW(list[1], std::out_of_range);
+    }
+}
 
 namespace ReadTokenTest{
     class ReadTokenTest : public testing::Test {
@@ -643,4 +684,306 @@ namespace WritePartialIndexTest {
     }
 
     // TODO: Add Randomized Stress Test to WritePartialIndexTest
+}
+
+namespace ConstructInvertedBlocksTest {
+    class ConstructInvertedBlocksTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+            in_dir = tmp_path / "in";
+            out_dir = tmp_path / "out";
+            fs::create_directory(in_dir);
+            fs::create_directory(out_dir);
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+        fs::path in_dir;
+        fs::path out_dir;
+
+        void write_stream(
+            const std::string& file_name,
+            const std::vector<std::pair<unsigned long long, std::string>>& v
+        ) {
+            SafeFile fp(in_dir / file_name, "wb");
+            for (const auto& [doc_id, term] : v) {
+                fwrite(&doc_id, sizeof(doc_id), 1, fp.get());
+                unsigned short term_length = term.size();
+                fwrite(&term_length, sizeof(term_length), 1, fp.get());
+                fwrite(term.c_str(), sizeof(char), term_length, fp.get());
+            }
+        }
+
+        // Reads a single block_*.bin (write_partial_index wire format) back
+        // into term -> sorted (doc_id,freq) pairs, mirroring
+        // WritePartialIndexTest's own verification approach.
+        std::map<std::string, std::vector<std::pair<unsigned long long, unsigned int>>>
+        read_block(const fs::path& block_path) {
+            std::map<std::string, std::vector<std::pair<unsigned long long, unsigned int>>> out;
+            SafeFile fp(block_path, "rb");
+
+            unsigned int dict_size;
+            fread(&dict_size, sizeof(dict_size), 1, fp.get());
+
+            for (unsigned int i = 0; i < dict_size; i++) {
+                unsigned short term_size;
+                unsigned int posting_list_size;
+                fread(&term_size, sizeof(term_size), 1, fp.get());
+                fread(&posting_list_size, sizeof(posting_list_size), 1, fp.get());
+
+                std::string term(term_size, '\0');
+                fread(&term[0], sizeof(char), term_size, fp.get());
+
+                unsigned long long offset = 0;
+                for (unsigned int j = 0; j < posting_list_size; j++) {
+                    unsigned char buffer[8];
+                    read_vbe(fp.get(), buffer);
+                    offset += vbe_decode(buffer);
+
+                    unsigned int freq;
+                    fread(&freq, sizeof(freq), 1, fp.get());
+                    out[term].push_back({offset, freq});
+                }
+            }
+            return out;
+        }
+    };
+
+    TEST_F(ConstructInvertedBlocksTest, SingleFileSingleBlock) {
+        write_stream("token_0000.bin", {
+            {10, "alpha"}, {10, "beta"}, {20, "alpha"}
+        });
+
+        ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
+
+        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        ASSERT_EQ(blocks.size(), 1);
+
+        auto result = read_block(blocks[0]);
+        ASSERT_EQ(result.size(), 2);
+        ASSERT_EQ(result["alpha"], (std::vector<std::pair<unsigned long long, unsigned int>>{{10,1},{20,1}}));
+        ASSERT_EQ(result["beta"], (std::vector<std::pair<unsigned long long, unsigned int>>{{10,1}}));
+    }
+
+    TEST_F(ConstructInvertedBlocksTest, MultipleInputFilesEachProduceABlock) {
+        write_stream("token_0000.bin", { {10, "alpha"} });
+        write_stream("token_0001.bin", { {20, "alpha"}, {20, "beta"} });
+
+        ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
+
+        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        ASSERT_EQ(blocks.size(), 2);
+
+        auto first = read_block(blocks[0]);
+        auto second = read_block(blocks[1]);
+
+        ASSERT_EQ(first["alpha"], (std::vector<std::pair<unsigned long long, unsigned int>>{{10,1}}));
+        ASSERT_EQ(second["alpha"], (std::vector<std::pair<unsigned long long, unsigned int>>{{20,1}}));
+        ASSERT_EQ(second["beta"], (std::vector<std::pair<unsigned long long, unsigned int>>{{20,1}}));
+    }
+
+    TEST_F(ConstructInvertedBlocksTest, LowMemLimitProducesMultipleBlocksPerFile) {
+        std::vector<std::pair<unsigned long long, std::string>> v;
+        for (int i = 0; i < 500; i++) {
+            v.push_back({(unsigned long long)i, std::format("term{}", i)});
+        }
+        write_stream("token_0000.bin", v);
+
+        ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)1000));
+
+        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        ASSERT_GT(blocks.size(), 1);
+    }
+
+    TEST_F(ConstructInvertedBlocksTest, EmptyInputDirProducesNoBlocks) {
+        ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
+
+        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        ASSERT_EQ(blocks.size(), 0);
+    }
+}
+
+namespace WriteDocLenEntryTest {
+    class WriteDocLenEntryTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+    };
+
+    TEST_F(WriteDocLenEntryTest, WritesDeltaAndFreq) {
+        fs::path file_name = tmp_path / "doc_len_entry.bin";
+
+        {
+            SafeFile out_fp(file_name, "wb");
+            ASSERT_NO_THROW(write_doc_len_entry(out_fp, 300, 42));
+        }
+
+        SafeFile in_fp(file_name, "rb");
+        unsigned char buffer[8];
+        bool res = read_vbe(in_fp.get(), buffer);
+        ASSERT_TRUE(res);
+        ASSERT_EQ(vbe_decode(buffer), 300);
+
+        unsigned char freq;
+        size_t arg_count = fread(&freq, sizeof(freq), 1, in_fp.get());
+        ASSERT_EQ(arg_count, 1);
+        ASSERT_EQ(freq, 42);
+    }
+
+    TEST_F(WriteDocLenEntryTest, WritesMultipleEntriesSequentially) {
+        fs::path file_name = tmp_path / "doc_len_entry.bin";
+
+        std::vector<std::pair<unsigned long long, unsigned char>> entries = {
+            {0, 1}, {127, 5}, {128, 255}, {(1LL<<40), 10}
+        };
+
+        {
+            SafeFile out_fp(file_name, "wb");
+            for (const auto& [delta, freq] : entries) {
+                ASSERT_NO_THROW(write_doc_len_entry(out_fp, delta, freq));
+            }
+        }
+
+        SafeFile in_fp(file_name, "rb");
+        for (const auto& [delta, freq] : entries) {
+            unsigned char buffer[8];
+            ASSERT_TRUE(read_vbe(in_fp.get(), buffer));
+            ASSERT_EQ(vbe_decode(buffer), delta);
+
+            unsigned char read_freq;
+            ASSERT_EQ(fread(&read_freq, sizeof(read_freq), 1, in_fp.get()), 1);
+            ASSERT_EQ(read_freq, freq);
+        }
+    }
+}
+
+namespace ConstructDocLenListTest {
+    class ConstructDocLenListTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+            in_dir = tmp_path / "in";
+            out_dir = tmp_path / "out";
+            fs::create_directory(in_dir);
+            fs::create_directory(out_dir);
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+        fs::path in_dir;
+        fs::path out_dir;
+
+        void write_stream(
+            const std::string& file_name,
+            const std::vector<std::pair<unsigned long long, std::string>>& v
+        ) {
+            SafeFile fp(in_dir / file_name, "wb");
+            for (const auto& [doc_id, term] : v) {
+                fwrite(&doc_id, sizeof(doc_id), 1, fp.get());
+                unsigned short term_length = term.size();
+                fwrite(&term_length, sizeof(term_length), 1, fp.get());
+                fwrite(term.c_str(), sizeof(char), term_length, fp.get());
+            }
+        }
+
+        // Reads doc_len_table.bin back into a list of (doc_id, freq),
+        // reversing the delta encoding write_doc_len_entry applied.
+        std::vector<std::pair<unsigned long long, unsigned int>> read_doc_len_table() {
+            std::vector<std::pair<unsigned long long, unsigned int>> out;
+            SafeFile fp(out_dir / "doc_len_table.bin", "rb");
+
+            unsigned long long doc_id = 0;
+            unsigned char buffer[8];
+            while (read_vbe(fp.get(), buffer)) {
+                doc_id += vbe_decode(buffer);
+
+                unsigned char freq;
+                fread(&freq, sizeof(freq), 1, fp.get());
+                out.push_back({doc_id, freq});
+            }
+            return out;
+        }
+    };
+
+    TEST_F(ConstructDocLenListTest, SingleFileMultipleDocs) {
+        write_stream("token_0000.bin", {
+            {3, "a"}, {3, "b"}, {5, "c"}, {5, "d"}, {5, "e"}, {8, "f"}
+        });
+
+        ASSERT_NO_THROW(construct_doc_len_list(in_dir, out_dir));
+
+        auto result = read_doc_len_table();
+        std::vector<std::pair<unsigned long long, unsigned int>> expected = {
+            {3, 2}, {5, 3}, {8, 1}
+        };
+        ASSERT_EQ(result, expected);
+    }
+
+    TEST_F(ConstructDocLenListTest, FirstDocIdIsZero) {
+        // Regression test: the very first document processed must not be
+        // silently dropped when its doc_id happens to equal the loop's
+        // zero-initialized sentinel.
+        write_stream("token_0000.bin", {
+            {0, "a"}, {0, "b"}, {3, "c"}, {5, "d"}
+        });
+
+        ASSERT_NO_THROW(construct_doc_len_list(in_dir, out_dir));
+
+        auto result = read_doc_len_table();
+        std::vector<std::pair<unsigned long long, unsigned int>> expected = {
+            {0, 2}, {3, 1}, {5, 1}
+        };
+        ASSERT_EQ(result, expected);
+    }
+
+    TEST_F(ConstructDocLenListTest, LastDocumentIsNotDropped) {
+        // Regression test: entries only used to get flushed on a doc_id
+        // transition, silently dropping whichever document was last.
+        write_stream("token_0000.bin", { {1, "a"}, {2, "b"}, {2, "c"} });
+
+        ASSERT_NO_THROW(construct_doc_len_list(in_dir, out_dir));
+
+        auto result = read_doc_len_table();
+        std::vector<std::pair<unsigned long long, unsigned int>> expected = {
+            {1, 1}, {2, 2}
+        };
+        ASSERT_EQ(result, expected);
+    }
+
+    TEST_F(ConstructDocLenListTest, MultipleInputFilesContinueAcrossBoundary) {
+        write_stream("token_0000.bin", { {1, "a"}, {1, "b"} });
+        write_stream("token_0001.bin", { {4, "c"}, {4, "d"}, {4, "e"} });
+
+        ASSERT_NO_THROW(construct_doc_len_list(in_dir, out_dir));
+
+        auto result = read_doc_len_table();
+        std::vector<std::pair<unsigned long long, unsigned int>> expected = {
+            {1, 2}, {4, 3}
+        };
+        ASSERT_EQ(result, expected);
+    }
+
+    TEST_F(ConstructDocLenListTest, EmptyInputProducesEmptyTable) {
+        ASSERT_NO_THROW(construct_doc_len_list(in_dir, out_dir));
+
+        auto result = read_doc_len_table();
+        ASSERT_TRUE(result.empty());
+    }
 }
