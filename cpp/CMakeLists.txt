@@ -50,7 +50,12 @@ set(SCHOLAR_RANK_SOURCES
     src/utils/logger.cpp
     src/utils/vbe.cpp
     src/utils/file_io.cpp
-    src/retrieval/index_builder.cpp
+    src/retrieval/posting_list.cpp
+    src/retrieval/bm25.cpp
+    src/retrieval/token_stream.cpp
+    src/retrieval/construct_inverted_blocks.cpp
+    src/retrieval/construct_doc_len_list.cpp
+    src/retrieval/merge_inverted_blocks.cpp
 )
 
 # Building a library scholar_rank_core compiled from SCHOLAR_RANK_SOURCES.
@@ -64,7 +69,8 @@ target_include_directories(scholar_rank_core PUBLIC
 # Adding CLI entry points (apps/)
 add_executable(build_inverted_blocks apps/build_inverted_blocks.cpp)
 target_link_libraries(build_inverted_blocks PRIVATE scholar_rank_core)
-
+add_executable(build_doc_len_list apps/build_doc_len_list.cpp)
+target_link_libraries(build_doc_len_list PRIVATE scholar_rank_core)
 # Adding tests
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
 FetchContent_MakeAvailable(googletest)

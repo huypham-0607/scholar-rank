@@ -4,7 +4,7 @@
  * over tokenized input, ahead of merge_inverted_blocks.
  */
 
-#include "scholar_rank/retrieval/index_builder.h"
+#include "scholar_rank/retrieval/construct_inverted_blocks.h"
 #include "scholar_rank/utils/logger.h"
 
 #include <filesystem>

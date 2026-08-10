@@ -1,4 +1,7 @@
-#include "scholar_rank/retrieval/index_builder.h"
+#include "scholar_rank/retrieval/posting_list.h"
+#include "scholar_rank/retrieval/token_stream.h"
+#include "scholar_rank/retrieval/construct_inverted_blocks.h"
+#include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/utils/vbe.h"
 #include "scholar_rank/utils/file_io.h"
 
@@ -903,11 +906,11 @@ namespace ConstructDocLenListTest {
             }
         }
 
-        // Reads doc_len_table.bin back into a list of (doc_id, freq),
+        // Reads doc_len_list.bin back into a list of (doc_id, freq),
         // reversing the delta encoding write_doc_len_entry applied.
         std::vector<std::pair<unsigned long long, unsigned int>> read_doc_len_table() {
             std::vector<std::pair<unsigned long long, unsigned int>> out;
-            SafeFile fp(out_dir / "doc_len_table.bin", "rb");
+            SafeFile fp(out_dir / "doc_len_list.bin", "rb");
 
             unsigned long long doc_id = 0;
             unsigned char buffer[8];

@@ -1,0 +1,491 @@
+/**
+ * @brief Merging partial posting blocks, into a final complete posting list.
+ *
+ * Each posting (1 single term) will be treated as an atomic unit. We will
+ * group these posting units into blocks of certain sizes.
+ *
+ * Maintain a separate look-up list storing (file_id, position) tuple for fast
+ * querying.
+ *
+ * To remind, Standard BM25 implementation is:
+ *
+ *  - log(N/df(Term)) * tf(term,doc)(k+1) / tf(term,doc) + k (1-b+b(|d|/avgdl))
+ *
+ * For WAND scoring function \alpha_{t} * w(t,d)
+ * - \alpha_{t} is our IDF (log(N/df(Term)))
+ * - w(t,d) is tf(term,doc)(k+1) / tf(term,doc) + k (1-b+b(|d|/avgdl)).
+ *
+ * When querying with BMW, we will load all relevant
+ */
+
+#include "scholar_rank/retrieval/merge_inverted_blocks.h"
+#include "scholar_rank/retrieval/posting_list.h"
+#include "scholar_rank/retrieval/bm25.h"
+#include "scholar_rank/retrieval/construct_doc_len_list.h"
+#include "scholar_rank/utils/file_io.h"
+#include "scholar_rank/utils/vbe.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <format>
+#include <queue>
+#include <stdexcept>
+#include <unordered_map>
+
+namespace fs = std::filesystem;
+
+BlockMeta::BlockMeta(
+    unsigned long long _delta,
+    unsigned int _file_index,
+    size_t _start_addr,
+    float _block_ub
+) :
+delta(_delta),
+file_index(_file_index),
+start_addr(_start_addr),
+block_ub(_block_ub) {}
+
+TermMeta::TermMeta() : term_ub(0.0f), max_doc_id(0), doc_count(0) {}
+
+// <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
+class Stream {
+public:
+    Stream(const fs::path in_path) : in_file(SafeFile(in_path, "rb")) {
+        is_empty = false;
+
+        in_file.fread(&dict_size, sizeof(dict_size), 1);
+        if (dict_size == 0) {
+            is_empty = true;
+        }
+        else {
+            list_id = 0;
+
+            // Setting up first posting_list
+            unsigned short term_size;
+            in_file.fread(&term_size, sizeof(term_size), 1);
+            in_file.fread(&list_size, sizeof(list_size), 1);
+            term.clear(); term.resize(term_size);
+            in_file.fread(&(term[0]), sizeof(char), term_size);
+
+            // Setting up first posting_item (posting list should be non-empty)
+            item_id = 0;
+            doc_id = 0;
+            unsigned char buffer[BUFFER_LIMIT];
+            read_vbe(in_file.get(), buffer);
+            doc_id += vbe_decode(buffer);
+            in_file.fread(&freq, sizeof(freq), 1);
+        }
+    }
+
+    bool empty() const {
+        return is_empty;
+    }
+
+    PostingItem get_item() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing item in an empty Stream"
+            ));
+        }
+        return PostingItem(doc_id, freq);
+    }
+
+    unsigned int get_item_id() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing item_id in an empty Stream"
+            ));
+        }
+        return item_id;
+    }
+
+    unsigned int get_list_size() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing list_size in an empty Stream"
+            ));
+        }
+        return list_size;
+    }
+
+    std::string get_term() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing term in an empty Stream"
+            ));
+        }
+        return term;
+    }
+
+    unsigned int get_list_id() const {
+        if (is_empty) {
+            throw std::runtime_error(std::format(
+                "Accessing list_id in an empty Stream"
+            ));
+        }
+        return list_id;
+    }
+
+    unsigned int get_dict_size() const {
+        return dict_size;
+    }
+
+    /*
+     * Returns true if next item is available (not empty).
+     */
+    bool next() {
+        if (is_empty) return false;
+        ++item_id;
+        if (item_id == list_size) {
+            ++list_id;
+            if (list_id == dict_size) {
+                is_empty = true;
+                return false;
+            }
+
+            unsigned short term_size;
+            in_file.fread(&term_size, sizeof(term_size), 1);
+            in_file.fread(&list_size, sizeof(list_size), 1);
+            term.clear(); term.resize(term_size);
+            in_file.fread(&(term[0]), sizeof(char), term_size);
+
+            item_id = 0;
+            doc_id = 0;
+        }
+
+        unsigned char buffer[BUFFER_LIMIT];
+        read_vbe(in_file.get(), buffer);
+        doc_id += vbe_decode(buffer);
+        in_file.fread(&freq, sizeof(freq), 1);
+        return true;
+    }
+
+private:
+    SafeFile in_file;
+    bool is_empty;
+    unsigned int dict_size;
+
+    unsigned int list_id;
+    unsigned int list_size;
+    std::string term;
+
+    unsigned int item_id;
+    unsigned long long doc_id;
+    unsigned int freq;
+};
+
+/**
+ * @brief Write buffer's postings (delta-encoded from 0, i.e. resetting the
+ * delta base at this block boundary - required for start_addr to be
+ * independently seekable) to out_file, compute this block's metadata, and
+ * clear buffer.
+ *
+ * block_ub is left as the saturation-only term (see bm25_saturation) -
+ * the caller multiplies in IDF once df_t is known.
+ *
+ * @param prev_block_start_doc_id start_doc_id of the previously flushed
+ * block for this term (0 for the first block); updated to this block's
+ * start_doc_id on return.
+ * @param bytes_written accumulator, incremented by the bytes actually written.
+ */
+BlockMeta flush_buffer(
+    PostingList& buffer,
+    const SafeFile& out_file,
+    const unsigned int file_index,
+    const std::vector<unsigned char>& doc_len_list,
+    const float avgdl,
+    const float k1,
+    const float b,
+    unsigned long long& prev_block_start_doc_id,
+    size_t& bytes_written
+) {
+    unsigned long long start_doc_id = buffer[0].doc_id;
+    unsigned long long meta_delta = start_doc_id - prev_block_start_doc_id;
+    prev_block_start_doc_id = start_doc_id;
+
+    size_t start_addr = (size_t)ftell(out_file.get());
+
+    float max_saturation = 0.0f;
+    unsigned long long last = 0;
+    unsigned char vbe_buffer[BUFFER_LIMIT];
+
+    for (size_t i = 0; i < buffer.size(); i++) {
+        const PostingItem& item = buffer[i];
+        unsigned long long posting_delta = item.doc_id - last;
+        int encode_length = vbe_encode(posting_delta, vbe_buffer);
+        fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
+        fwrite(&item.freq, sizeof(item.freq), 1, out_file.get());
+        last = item.doc_id;
+        bytes_written += encode_length + sizeof(item.freq);
+
+        float doc_len = (float)doc_len_list[item.doc_id];
+        float saturation = bm25_saturation(k1, b, (float)item.freq, doc_len, avgdl);
+        max_saturation = std::max(max_saturation, saturation);
+    }
+
+    buffer.clear();
+
+    return BlockMeta(meta_delta, file_index, start_addr, max_saturation);
+}
+
+size_t build_posting_list(
+    const std::string& term,
+    const std::vector<int>& valid_streams,
+    std::vector<Stream>& streams,
+    const std::vector<unsigned char>& doc_len_list,
+    const SafeFile& out_file,
+    const unsigned int file_index,
+    std::unordered_map<std::string,TermMeta>& term_meta_mapping,
+    const int block_size,
+    const float avgdl,
+    const float k1,
+    const float b,
+    const unsigned long long N
+) {
+    std::priority_queue<
+        std::pair<PostingItem, int>,
+        std::vector<std::pair<PostingItem, int>>,
+        std::greater<std::pair<PostingItem,int>>
+    > item_heap;
+
+    for (auto i:valid_streams) {
+        if (!streams[i].empty() && streams[i].get_term() == term) {
+            item_heap.push(std::make_pair(streams[i].get_item(),i));
+        }
+    }
+
+    TermMeta& term_meta = term_meta_mapping[term];
+    PostingList buffer;
+    unsigned long long prev_block_start_doc_id = 0;
+    size_t total_size = 0;
+
+    // A single (doc_id, term) pair can arrive from the heap twice:
+    // build_partial_index's memory-limit check is per-token, not
+    // per-document, so a document's tokens for this term can be split
+    // across two separate SPIMI partial blocks. Those must be merged
+    // (has_document/add_document, and the merge has to happen before the
+    // block_size flush check.
+    while (!item_heap.empty()){
+        auto [item, stream_id] = item_heap.top();
+
+        bool is_new_doc = !buffer.has_document(item.doc_id);
+
+        if (is_new_doc && (int)buffer.size() == block_size) {
+            term_meta.block_meta_list.push_back(flush_buffer(
+                buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
+                prev_block_start_doc_id, total_size
+            ));
+        }
+
+        item_heap.pop();
+        buffer.add_document(item.doc_id, item.freq);
+        if (is_new_doc) {
+            term_meta.max_doc_id = item.doc_id;
+            ++term_meta.doc_count;
+        }
+
+        streams[stream_id].next();
+        if (!streams[stream_id].empty() && streams[stream_id].get_term() == term) {
+            item_heap.push(std::make_pair(streams[stream_id].get_item(),stream_id));
+        }
+    }
+
+    if (buffer.size() > 0) {
+        term_meta.block_meta_list.push_back(flush_buffer(
+            buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
+            prev_block_start_doc_id, total_size
+        ));
+    }
+
+    // df_t (term_meta.doc_count) is only known now that the term's heap is
+    // fully drained - apply IDF retroactively to every block this term
+    // just produced, turning saturation-only block_ub into the full BM25
+    // upper bound, and derive term_ub as the max over them.
+    float idf = std::log((float)N / (float)term_meta.doc_count);
+    float max_full_ub = 0.0f;
+    for (BlockMeta& block : term_meta.block_meta_list) {
+        block.block_ub *= idf;
+        max_full_ub = std::max(max_full_ub, block.block_ub);
+    }
+    term_meta.term_ub = max_full_ub;
+
+    return total_size;
+}
+
+/**
+ * @brief Serialize term_meta_mapping into a single consolidated file:
+ * for each term, (term_size, term_bytes, term_ub, max_doc_id, doc_count,
+ * block_count), followed by block_count blocks of
+ * (delta<vbe>, file_index, start_addr, block_ub).
+ *
+ * No leading term count - read_block_meta_file reads until a clean EOF.
+ */
+void write_block_meta_file(
+    const fs::path& out_path,
+    const std::unordered_map<std::string, TermMeta>& term_meta_mapping
+) {
+    SafeFile out_file(out_path, "wb");
+
+    for (const auto& [term, term_meta] : term_meta_mapping) {
+        unsigned short term_size = term.size();
+        fwrite(&term_size, sizeof(term_size), 1, out_file.get());
+        fwrite(term.c_str(), sizeof(char), term_size, out_file.get());
+
+        fwrite(&term_meta.term_ub, sizeof(term_meta.term_ub), 1, out_file.get());
+        fwrite(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1, out_file.get());
+        fwrite(&term_meta.doc_count, sizeof(term_meta.doc_count), 1, out_file.get());
+
+        unsigned int block_count = term_meta.block_meta_list.size();
+        fwrite(&block_count, sizeof(block_count), 1, out_file.get());
+
+        unsigned char vbe_buffer[BUFFER_LIMIT];
+        for (const BlockMeta& block : term_meta.block_meta_list) {
+            int encode_length = vbe_encode(block.delta, vbe_buffer);
+            fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
+            fwrite(&block.file_index, sizeof(block.file_index), 1, out_file.get());
+            fwrite(&block.start_addr, sizeof(block.start_addr), 1, out_file.get());
+            fwrite(&block.block_ub, sizeof(block.block_ub), 1, out_file.get());
+        }
+    }
+}
+
+std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
+    const fs::path& in_path
+) {
+    SafeFile in_file(in_path, "rb");
+    std::vector<std::pair<std::string, TermMeta>> result;
+
+    while (true) {
+        unsigned short term_size;
+        if (!in_file.fread(&term_size, sizeof(term_size), 1, false)) break;
+
+        std::string term(term_size, '\0');
+        in_file.fread(&term[0], sizeof(char), term_size);
+
+        TermMeta term_meta;
+        in_file.fread(&term_meta.term_ub, sizeof(term_meta.term_ub), 1);
+        in_file.fread(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1);
+        in_file.fread(&term_meta.doc_count, sizeof(term_meta.doc_count), 1);
+
+        unsigned int block_count;
+        in_file.fread(&block_count, sizeof(block_count), 1);
+
+        for (unsigned int i = 0; i < block_count; i++) {
+            unsigned char vbe_buffer[BUFFER_LIMIT];
+            read_vbe(in_file.get(), vbe_buffer);
+            unsigned long long delta = vbe_decode(vbe_buffer);
+
+            unsigned int file_index;
+            size_t start_addr;
+            float block_ub;
+            in_file.fread(&file_index, sizeof(file_index), 1);
+            in_file.fread(&start_addr, sizeof(start_addr), 1);
+            in_file.fread(&block_ub, sizeof(block_ub), 1);
+
+            term_meta.block_meta_list.push_back(BlockMeta(delta, file_index, start_addr, block_ub));
+        }
+
+        result.push_back({term, term_meta});
+    }
+
+    return result;
+}
+
+void merge_inverted_blocks(
+    const fs::path& doc_len_dir,
+    const fs::path& in_dir,
+    const fs::path& out_dir,
+    const float k1,
+    const float b,
+    const int block_size,
+    const size_t split_size
+) {
+    std::vector<unsigned char> doc_len_list;
+
+    read_doc_len_list(doc_len_dir, doc_len_list);
+
+    unsigned long long total_doc_length = 0;
+
+    // Assuming doc_ids are mapped to [0,N)
+    for (unsigned long long i = 0; i < doc_len_list.size(); i++) {
+        total_doc_length += doc_len_list[i];
+    }
+
+    float avgdl = (float)total_doc_length/doc_len_list.size();
+    unsigned long long N = doc_len_list.size();
+
+    std::vector<fs::path> in_paths = glob_files(in_dir, "", ".bin");
+    sort(in_paths.begin(), in_paths.end());
+
+
+    std::vector<Stream> streams;
+    std::priority_queue<
+        std::pair<std::string, int>,
+        std::vector<std::pair<std::string, int>>,
+        std::greater<std::pair<std::string,int>>
+    > string_heap;
+
+    for (int i = 0; i < in_paths.size(); i++){
+        streams.push_back(Stream(in_paths[i]));
+        if (!streams[i].empty()) {
+            string_heap.push(std::make_pair(streams[i].get_term(),i));
+        }
+    }
+
+    std::unordered_map<std::string, TermMeta> term_meta_mapping;
+    size_t cur_disk_usage = 0;
+    unsigned int file_index = 0;
+
+    SafeFile out_file(
+        (out_dir / std::format("posting_{:04}.bin", file_index)),
+        "wb"
+    );
+
+    while (!string_heap.empty()) {
+        std::string term = string_heap.top().first;
+        std::vector<int> valid_streams;
+
+        while (!string_heap.empty() && string_heap.top().first == term) {
+            valid_streams.push_back(string_heap.top().second);
+            string_heap.pop();
+        }
+
+        size_t disk_required = build_posting_list(
+            term,
+            valid_streams,
+            streams,
+            doc_len_list,
+            out_file,
+            file_index,
+            term_meta_mapping,
+            block_size,
+            avgdl,
+            k1,
+            b,
+            N
+        );
+
+        // Streams that still have data after being drained past `term` need
+        // to go back into the heap under their new current term - otherwise
+        // every stream only ever contributes its first term.
+        for (int i : valid_streams) {
+            if (!streams[i].empty()) {
+                string_heap.push(std::make_pair(streams[i].get_term(), i));
+            }
+        }
+
+        if (cur_disk_usage && cur_disk_usage + disk_required > split_size) {
+            ++file_index;
+            cur_disk_usage = 0;
+            out_file = SafeFile(
+                (out_dir / std::format("posting_{:04}.bin", file_index)),
+                "wb"
+            );
+        }
+
+        cur_disk_usage += disk_required;
+    }
+
+    write_block_meta_file(out_dir / "block_meta.bin", term_meta_mapping);
+}
