@@ -2,23 +2,23 @@
 
 ScholarRank is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
 
-# Project Status (as of 2026-08-02)
+# Project Status (as of 2026-08-10)
 
 **Data pipeline: done.** Full OpenAlex Works corpus (510M+ works, 241GB compact) fetched, extracted, and
 validated. See `docs/data_pipeline.md`.
 
-**Three technical pillars, in progress:**
+**Three technical pillars:**
 - **Block-Max WAND** — a custom lexical retrieval engine (dynamic pruning, finds top-k results without scoring
   every document), replacing DuckDB's built-in full-text search, which was too slow at full corpus scale.
-  Tokenization (Python) is built and working; index construction (C++) is in progress. See
-  `docs/retrieval_engine.md`.
+  Tokenization (Python) and index construction (SPIMI build + BMW block-metadata merge, C++, 72 tests passing)
+  are done. Query-time traversal is next, not yet started. See `docs/retrieval_engine.md`.
 - **Global PageRank** — whole-graph authority score. Not started yet.
 - **Approximate top-k Personalized PageRank (local push)** — query-time, seed-driven authority that stays
   bounded-memory by walking only the relevant part of the graph rather than the whole thing. Not started yet.
 
 Supporting work: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to
-develop and validate against, instead of iterating against the full 510M-node graph on every change. A basic
-C++ build system and logging utility are working.
+develop and validate against, instead of iterating against the full 510M-node graph on every change. C++ build
+system, logging, and a small shared utility layer (RAII file wrapper, variable-byte encoding) are working.
 
 **Semantic/embedding retrieval: dropped for now**, not part of the near-term plan — judged too computationally
 ambitious to take on alongside the three pillars above. May be revisited later (not before ~3 months out).
@@ -26,10 +26,11 @@ ambitious to take on alongside the three pillars above. May be revisited later (
 ## Current progress & near-term todo
 
 - [x] Data pipeline (Phase 1)
-- [x] Tokenization/normalization pipeline
+- [x] Tokenization/normalization pipeline (incl. dense doc_id remapping)
 - [x] Development test subgraph (Mathematics field subset)
 - [x] C++ build system + logging
-- [ ] Block-Max WAND index construction (C++, in progress) + query engine
+- [x] Block-Max WAND index construction (SPIMI build + BMW block-metadata merge, C++)
+- [ ] Block-Max WAND query engine (C++)
 - [ ] Global PageRank (C++)
 - [ ] Approximate top-k Personalized PageRank (C++)
 - [ ] End-to-end validation against public benchmarks (BEIR for lexical, SNAP/OGB citation graphs for ranking)

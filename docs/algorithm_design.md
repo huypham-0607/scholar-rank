@@ -85,6 +85,12 @@ access, not linear scan):
   hand-built C++ PageRank implementation over a hand-built CSR structure, not library-wrapped — closer to what
   this project is actually building than a scipy-based example.
 
+**Note**: the same "sparse raw IDs are unusable as array indices" problem already got solved on the BMW side —
+`tokenizer.py` ranks every document into a dense `[0,N)` `mapped_id` up front (`doc_id_lookup.bin`), and all
+retrieval-side structures (posting lists, `doc_len_list.bin`, BMW block metadata) index by it. Whether the
+graph's node IDs reuse that same mapped_id space or need their own numbering is still open — worth deciding by
+reusing rather than re-solving, since it's the identical underlying question.
+
 ### 2.5) Additional/Experimental criterias (subject to change)
 - F(d,q): Freshness score for a document/query pair, Higher score for more recent paper, and higher/lower score if query explicitly mention a timestamp.
 - Q(d): Intrinsic Quality for a research paper. Hard to quantify this.
@@ -94,7 +100,9 @@ access, not linear scan):
 ### Stage 1: High-recall candidate retrieval
 
 Retrieve 500-2000 potential candidates using
-- Lexical retrieval — **immediate next implementation step, via DuckDB's FTS extension**
+- Lexical retrieval — a custom Block-Max WAND engine, not DuckDB's FTS extension (tried first, abandoned for
+  being too slow at full corpus scale). Index construction is built and tested; query-time traversal is the
+  current implementation focus. See `docs/retrieval_engine.md`.
     - BM25 over title/topic/keywords
     - Title/topic/keyword matches > Abstract matches
     - Compute exact entity matches
@@ -161,32 +169,36 @@ Baseline Models:
 
 # 6. Project tree
 
-Actual layout uses `utils/` (not `common/`) for shared infrastructure — updated below to match. Items marked
-✅ exist and work; ⏳ exist but incomplete; unmarked = not started yet.
+Items marked ✅ exist and work (tested); ⏳ exist but incomplete/stub only; unmarked = not started yet.
 
 ```
 cpp/
-├── CMakeLists.txt                      ✅ C++20, compile_commands.json, Release build
+├── CMakeLists.txt                      ✅ C++20, compile_commands.json, Release build, ctest wired up
 ├── include/scholar_rank/
-│   ├── utils/logger.hpp                ✅
-│   ├── retrieval/                      # posting list, dictionary, WAND/BMW query engine headers
-│   └── graph/                          # CSR/CSC structures, PageRank, PPR headers
+│   ├── utils/
+│   │   ├── logger.h                    ✅
+│   │   ├── vbe.h                       ✅ variable-byte encoding
+│   │   └── file_io.h                   ✅ SafeFile (RAII FILE* wrapper), glob_files
+│   ├── retrieval/
+│   │   ├── posting_list.h              ✅ PostingItem, PostingList
+│   │   ├── bm25.h                      ✅ calc_BM25, bm25_saturation
+│   │   ├── token_stream.h              ✅ read_token (tokenizer wire format)
+│   │   ├── construct_inverted_blocks.h ✅ SPIMI partial-block construction
+│   │   ├── construct_doc_len_list.h    ✅ document-length table construction
+│   │   ├── merge_inverted_blocks.h     ✅ BlockMeta/TermMeta, k-way merge, BMW block metadata
+│   │   └── query_engine.h              ⏳ stub function signatures only
+│   └── graph/                          # CSR/CSC structures, PageRank, PPR headers — not started
 ├── src/
-│   ├── utils/logger.cpp                ✅ zoned_time timestamps, std::cerr output
-│   ├── retrieval/
-│   │   ├── index_builder.cpp           ⏳ SPIMI construction — structure in place, does not compile yet
-│   │   ├── posting_list.cpp
-│   │   └── query_engine.cpp            # WAND/BMW top-k traversal
-│   └── graph/
-│       ├── csr_builder.cpp
-│       ├── pagerank.cpp
-│       └── ppr.cpp
+│   ├── utils/                          ✅ mirrors headers above
+│   ├── retrieval/                      ✅ mirrors headers above; query_engine.cpp ⏳ stub, not wired into the build
+│   └── graph/                          # not started
 ├── apps/
-│   ├── build_index.cpp                 # CLI: tokenized parquet -> serialized index
-│   ├── build_graph.cpp                 # CLI: edge list -> CSR/CSC
-│   └── query.cpp                       # CLI: run a query against a built index
+│   ├── build_inverted_blocks.cpp       ✅ CLI: tokenized input -> partial SPIMI blocks
+│   ├── build_doc_len_list.cpp          ✅ CLI: tokenized input -> doc_len_list.bin
+│   └── (merge + query CLI entry points not added yet)
 ├── tests/
-│   ├── retrieval/
+│   ├── utils/                          ✅ vbe_tests, file_io_tests
+│   ├── retrieval/                      ✅ one GoogleTest binary per source file above — 72 tests total
 │   └── graph/
-└── benchmarks/                         # ties to the BEIR/SNAP/OGB datasets already compiled
+└── benchmarks/                         # ties to the BEIR/SNAP/OGB datasets already compiled — not started
 ```

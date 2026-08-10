@@ -81,31 +81,55 @@ option in the same extension). No Python stemming library needed. Known over-ste
 inherent to rule-based stemming generally, not fixable by switching stemmer choice. Accepted as sufficient for
 BM25: IDF naturally discounts collision-heavy stems, and multi-term queries dilute single-term noise.
 
-#### 2.2.2) Inverted Index List (Posting List)
+#### 2.2.2) Inverted Index List (Posting List) — implemented
 
-**Language boundary**: Python's job stops at producing tokens (2.2.1). Everything past that — dictionary,
-inversion, sorting, block-max metadata, serialization, merge — is C++. Handoff is chunked `(id, tokens)`
-parquet, not a pre-grouped intermediate — grouping into per-term posting lists is inversion, which belongs on
-the C++ side with everything else, not split across languages.
+**Language boundary**: Python's job stops at producing tokens (2.2.1), plus one more thing — a dense doc_id
+remapping (`tokenizer.py`'s `build_doc_id_lookup`, writing `doc_id_lookup.bin`). Raw OpenAlex numeric IDs are
+sparse and can exceed `int32`, so every document gets ranked into a dense `[0,N)` id once, up front; everything
+downstream (posting lists, doc lengths, and eventually the graph) indexes by this id instead, which is what
+makes flat-array O(1) lookups possible everywhere else. Everything past tokenization — dictionary, inversion,
+sorting, block-max metadata, serialization, merge — is C++.
 
-**Build strategy — SPIMI / block-sort indexing**: process tokenized chunks one at a time, build a partial
-index per chunk in memory, flush to disk sorted by term, merge all partial indexes at the end. Standard answer
-(Manning/Raghavan/Schütze ch. 4) to indexing a corpus larger than available RAM.
+**Build pipeline, three stages, each its own file** (`cpp/src/retrieval/`):
 
-**Per-term storage — two arrays, not one flat list**:
+| Stage | File | Output |
+|---|---|---|
+| SPIMI partial-block construction | `construct_inverted_blocks.cpp` | `block_*.bin`, one set per memory-limited chunk |
+| Document length table | `construct_doc_len_list.cpp` | `doc_len_list.bin`, dense array by doc_id |
+| K-way merge + BMW block-metadata | `merge_inverted_blocks.cpp` | `posting_*.bin` + one consolidated `block_meta.bin` |
+
+Shared pieces both later stages depend on: `posting_list.cpp` (`PostingItem`/`PostingList`), `bm25.cpp`
+(`calc_BM25`/`bm25_saturation`), `token_stream.cpp` (`read_token`, the tokenizer wire-format reader).
+
+**Per-term storage — two arrays, not one flat list**, as planned, now with the open questions resolved:
 
 | Array | Contents | Purpose |
 |---|---|---|
-| Block metadata | `last_doc_id`, `max_score`/`max_impact`, `posting_offset`, `count` — one entry per block | Scanned to decide skip/no-skip *without* touching postings |
-| Posting data | `doc_id` delta + `tf`, sorted by `doc_id` | Only read for blocks that survive pruning |
+| Block metadata (`BlockMeta`, in `block_meta.bin`) | `doc_id` (block's start doc), `file_index`, `start_addr`, `block_ub` | Scanned to decide skip/no-skip *without* touching postings |
+| Posting data (`posting_*.bin`) | `doc_id` delta + `tf`, sorted, delta-encoding resets at each block boundary | Only read for blocks that survive pruning |
 
-- Fixed-size blocks to start (constant stride, e.g. 64/128 postings) — VBMW's variable blocks are a real
-  upgrade once this works, not a starting point.
-- **Open tradeoff, not yet decided**: precomputed max BM25 *score* per block (tighter bound, but ties the
-  index to fixed `k1`/`b` — retuning needs a rebuild) vs. raw max *impact/tf* (flexible, but needs
-  min-doc-length-in-block tracked too, since shorter docs get less length-penalty).
-- Final index ships as flat binary file(s), `mmap()`-ed at query time — lets the OS page blocks in on demand
-  instead of requiring the whole index resident in RAM, same motivation as chunked SPIMI construction.
+- **Block size**: a fixed posting count per block (constructor parameter, default 128), not a byte budget.
+- **Score vs. impact, resolved**: `block_ub`/`term_ub` store the *full* BM25 upper bound (`IDF * saturation`),
+  not raw impact. This ties the index to whatever `k1`/`b` it was built with — retuning needs a full rebuild —
+  accepted as the tradeoff. Computed in two passes since `df_t` (needed for `IDF`) isn't known until a term's
+  postings are fully merged: the saturation term is computed per-block during the merge, then every block's
+  bound is multiplied by `IDF` retroactively once `df_t` is final.
+- **`BlockMeta.doc_id` is always absolute in memory**, binary-searchable directly with no reconstruction step
+  by the caller. Only the on-disk *serialization* delta-encodes consecutive blocks' start `doc_id` (VBE
+  compressed, same scheme as posting deltas) — `write_block_meta_file` encodes the delta, `read_block_meta_file`
+  reconstructs the absolute value while loading.
+- **One consolidated `block_meta.bin`**, not one file per term and not scattered across the `posting_*.bin`
+  files. It's small relative to the posting data it describes (roughly `block_size`:1 smaller), so it's meant
+  to be fully loaded/`mmap()`-ed and kept resident for the query engine's whole lifetime, while posting data
+  stays properly out-of-core.
+- 72 GoogleTest cases across the files above (`ctest --test-dir build`, or `./build/<name>_tests` per file).
+
+**Not started**: query-time traversal (`query_engine.h`/`.cpp`) — stub function names only (`find_pivot`,
+`move_posting`, `move_posting_shallow`, `full_evaluate`, `get_new_candidate`), sketching the planned WAND/BMW
+pivot-and-skip operations, not wired into the build yet. Current thinking, not yet a commitment: query-string
+tokenization stays in Python (reusing `tokenizer.py` exactly, since query terms must normalize identically to
+indexed terms), with the C++ engine exposed via bindings and kept resident across many queries rather than
+invoked fresh per query.
 
 ## 3. Readings
 

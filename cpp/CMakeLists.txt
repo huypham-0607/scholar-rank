@@ -71,6 +71,8 @@ add_executable(build_inverted_blocks apps/build_inverted_blocks.cpp)
 target_link_libraries(build_inverted_blocks PRIVATE scholar_rank_core)
 add_executable(build_doc_len_list apps/build_doc_len_list.cpp)
 target_link_libraries(build_doc_len_list PRIVATE scholar_rank_core)
+add_executable(merge_inverted_blocks apps/merge_inverted_blocks.cpp)
+target_link_libraries(merge_inverted_blocks PRIVATE scholar_rank_core)
 # Adding tests
 enable_testing()
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
