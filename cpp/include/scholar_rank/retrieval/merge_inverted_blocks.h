@@ -9,21 +9,22 @@
 /**
  * @brief Per-block BMW metadata.
  *
- * delta is the difference between this block's start_doc_id and the
- * previous block's start_doc_id for the same term (0 => absolute doc_id,
- * for a term's first block). This is what's written to disk (VBE encoded).
- * Reconstructing absolute start_doc_id per block (required before it's
- * binary-searchable) is a loader-side responsibility: accumulate delta
- * across a term's block_meta_list in order.
+ * doc_id is this block's absolute start_doc_id - binary-searchable
+ * directly, no reconstruction needed by callers. On disk, consecutive
+ * blocks' start_doc_id are still delta+VBE encoded for space; the
+ * delta<->absolute conversion happens at the serialization boundary
+ * (write_block_meta_file encodes the delta, read_block_meta_file
+ * reconstructs the absolute value), so every BlockMeta that ever exists in
+ * memory - just-flushed or just-loaded - already holds an absolute doc_id.
  */
 struct BlockMeta {
-    unsigned long long delta;
+    unsigned long long doc_id;
     unsigned int file_index;
     size_t start_addr;
     float block_ub;
 
     BlockMeta(
-        unsigned long long _delta,
+        unsigned long long _doc_id,
         unsigned int _file_index,
         size_t _start_addr,
         float _block_ub

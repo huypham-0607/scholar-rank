@@ -192,10 +192,11 @@ namespace MergeInvertedBlocksTest {
         EXPECT_EQ(tm["zeta"].doc_count, 1);    EXPECT_EQ(tm["zeta"].max_doc_id, 6);
 
         // "alpha": 6 postings / block_size=2 -> 3 blocks: [0,1],[2,3],[5,7].
+        // block_meta_list[i].doc_id is each block's absolute start_doc_id.
         ASSERT_EQ(tm["alpha"].block_meta_list.size(), 3);
-        EXPECT_EQ(tm["alpha"].block_meta_list[0].delta, 0);
-        EXPECT_EQ(tm["alpha"].block_meta_list[1].delta, 2);
-        EXPECT_EQ(tm["alpha"].block_meta_list[2].delta, 3);
+        EXPECT_EQ(tm["alpha"].block_meta_list[0].doc_id, 0);
+        EXPECT_EQ(tm["alpha"].block_meta_list[1].doc_id, 2);
+        EXPECT_EQ(tm["alpha"].block_meta_list[2].doc_id, 5);
         EXPECT_NEAR(tm["alpha"].block_meta_list[0].block_ub, 0.301381f, 1e-4);
         EXPECT_NEAR(tm["alpha"].block_meta_list[1].block_ub, 0.372295f, 1e-4);
         EXPECT_NEAR(tm["alpha"].block_meta_list[2].block_ub, 0.301381f, 1e-4);
@@ -208,7 +209,7 @@ namespace MergeInvertedBlocksTest {
 
         // "zeta": singleton, one partial block.
         ASSERT_EQ(tm["zeta"].block_meta_list.size(), 1);
-        EXPECT_EQ(tm["zeta"].block_meta_list[0].delta, 6);
+        EXPECT_EQ(tm["zeta"].block_meta_list[0].doc_id, 6);
         EXPECT_NEAR(tm["zeta"].block_meta_list[0].block_ub, 2.691042f, 1e-3);
         EXPECT_NEAR(tm["zeta"].term_ub, 2.691042f, 1e-3);
         EXPECT_EQ(

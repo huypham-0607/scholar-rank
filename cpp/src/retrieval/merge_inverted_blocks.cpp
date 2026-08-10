@@ -36,12 +36,12 @@
 namespace fs = std::filesystem;
 
 BlockMeta::BlockMeta(
-    unsigned long long _delta,
+    unsigned long long _doc_id,
     unsigned int _file_index,
     size_t _start_addr,
     float _block_ub
 ) :
-delta(_delta),
+doc_id(_doc_id),
 file_index(_file_index),
 start_addr(_start_addr),
 block_ub(_block_ub) {}
@@ -182,11 +182,10 @@ private:
  * clear buffer.
  *
  * block_ub is left as the saturation-only term (see bm25_saturation) -
- * the caller multiplies in IDF once df_t is known.
+ * the caller multiplies in IDF once df_t is known. BlockMeta.doc_id is
+ * this block's absolute start_doc_id (delta-encoding only happens later,
+ * at serialization - see write_block_meta_file).
  *
- * @param prev_block_start_doc_id start_doc_id of the previously flushed
- * block for this term (0 for the first block); updated to this block's
- * start_doc_id on return.
  * @param bytes_written accumulator, incremented by the bytes actually written.
  */
 BlockMeta flush_buffer(
@@ -197,12 +196,9 @@ BlockMeta flush_buffer(
     const float avgdl,
     const float k1,
     const float b,
-    unsigned long long& prev_block_start_doc_id,
     size_t& bytes_written
 ) {
     unsigned long long start_doc_id = buffer[0].doc_id;
-    unsigned long long meta_delta = start_doc_id - prev_block_start_doc_id;
-    prev_block_start_doc_id = start_doc_id;
 
     size_t start_addr = (size_t)ftell(out_file.get());
 
@@ -226,7 +222,7 @@ BlockMeta flush_buffer(
 
     buffer.clear();
 
-    return BlockMeta(meta_delta, file_index, start_addr, max_saturation);
+    return BlockMeta(start_doc_id, file_index, start_addr, max_saturation);
 }
 
 size_t build_posting_list(
@@ -257,7 +253,6 @@ size_t build_posting_list(
 
     TermMeta& term_meta = term_meta_mapping[term];
     PostingList buffer;
-    unsigned long long prev_block_start_doc_id = 0;
     size_t total_size = 0;
 
     // A single (doc_id, term) pair can arrive from the heap twice:
@@ -274,7 +269,7 @@ size_t build_posting_list(
         if (is_new_doc && (int)buffer.size() == block_size) {
             term_meta.block_meta_list.push_back(flush_buffer(
                 buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
-                prev_block_start_doc_id, total_size
+                total_size
             ));
         }
 
@@ -294,7 +289,7 @@ size_t build_posting_list(
     if (buffer.size() > 0) {
         term_meta.block_meta_list.push_back(flush_buffer(
             buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
-            prev_block_start_doc_id, total_size
+            total_size
         ));
     }
 
@@ -340,8 +335,12 @@ void write_block_meta_file(
         fwrite(&block_count, sizeof(block_count), 1, out_file.get());
 
         unsigned char vbe_buffer[BUFFER_LIMIT];
+        unsigned long long prev_start_doc_id = 0;
         for (const BlockMeta& block : term_meta.block_meta_list) {
-            int encode_length = vbe_encode(block.delta, vbe_buffer);
+            unsigned long long delta = block.doc_id - prev_start_doc_id;
+            prev_start_doc_id = block.doc_id;
+
+            int encode_length = vbe_encode(delta, vbe_buffer);
             fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
             fwrite(&block.file_index, sizeof(block.file_index), 1, out_file.get());
             fwrite(&block.start_addr, sizeof(block.start_addr), 1, out_file.get());
@@ -371,10 +370,11 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
         unsigned int block_count;
         in_file.fread(&block_count, sizeof(block_count), 1);
 
+        unsigned long long cur_start_doc_id = 0;
         for (unsigned int i = 0; i < block_count; i++) {
             unsigned char vbe_buffer[BUFFER_LIMIT];
             read_vbe(in_file.get(), vbe_buffer);
-            unsigned long long delta = vbe_decode(vbe_buffer);
+            cur_start_doc_id += vbe_decode(vbe_buffer);
 
             unsigned int file_index;
             size_t start_addr;
@@ -383,7 +383,7 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
             in_file.fread(&start_addr, sizeof(start_addr), 1);
             in_file.fread(&block_ub, sizeof(block_ub), 1);
 
-            term_meta.block_meta_list.push_back(BlockMeta(delta, file_index, start_addr, block_ub));
+            term_meta.block_meta_list.push_back(BlockMeta(cur_start_doc_id, file_index, start_addr, block_ub));
         }
 
         result.push_back({term, term_meta});
