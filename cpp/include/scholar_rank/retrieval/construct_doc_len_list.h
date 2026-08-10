@@ -8,13 +8,13 @@
 void write_doc_len_entry(
     const SafeFile& out_fp,
     const unsigned long long& delta,
-    const unsigned char& freq
+    const unsigned int& freq
 );
 
 /**
  * @brief Construct doc_id - doc_len sequence (out_dir/doc_len_list.bin).
  *
- * Format: (doc_id<vbe_encoding>)(doc_len<unsigned char>)
+ * Format: (doc_id<vbe_encoding>)(doc_len<unsigned int>)
  */
 void construct_doc_len_list(
     const std::filesystem::path& in_dir,
@@ -27,7 +27,7 @@ void construct_doc_len_list(
  */
 void read_doc_len_list(
     const std::filesystem::path& in_dir,
-    std::vector<unsigned char>& doc_len_list
+    std::vector<unsigned int>& doc_len_list
 );
 
 #endif

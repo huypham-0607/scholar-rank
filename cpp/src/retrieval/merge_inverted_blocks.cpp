@@ -193,7 +193,7 @@ BlockMeta flush_buffer(
     PostingList& buffer,
     const SafeFile& out_file,
     const unsigned int file_index,
-    const std::vector<unsigned char>& doc_len_list,
+    const std::vector<unsigned int>& doc_len_list,
     const float avgdl,
     const float k1,
     const float b,
@@ -233,7 +233,7 @@ size_t build_posting_list(
     const std::string& term,
     const std::vector<int>& valid_streams,
     std::vector<Stream>& streams,
-    const std::vector<unsigned char>& doc_len_list,
+    const std::vector<unsigned int>& doc_len_list,
     const SafeFile& out_file,
     const unsigned int file_index,
     std::unordered_map<std::string,TermMeta>& term_meta_mapping,
@@ -401,7 +401,7 @@ void merge_inverted_blocks(
     const int block_size,
     const size_t split_size
 ) {
-    std::vector<unsigned char> doc_len_list;
+    std::vector<unsigned int> doc_len_list;
 
     read_doc_len_list(doc_len_dir, doc_len_list);
 

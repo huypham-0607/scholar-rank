@@ -12,9 +12,8 @@ namespace fs = std::filesystem;
 void write_doc_len_entry(
     const SafeFile& out_fp,
     const unsigned long long& delta,
-    const unsigned char& freq
+    const unsigned int& freq
 ) {
-    // This depends on assertion that freq (from OpenAlex) never exceed (1<<8)
     unsigned char buffer[8];
     size_t encode_len = vbe_encode(delta, buffer);
     size_t arg_count;
@@ -43,7 +42,7 @@ void construct_doc_len_list(
 
     unsigned long long delta = 0;
     unsigned long long prev_doc_id = 0;
-    unsigned char running_freq = 0;
+    unsigned int running_freq = 0;
     for (auto &token_stream : token_streams) {
         SafeFile fp(token_stream, "rb");
         unsigned long long cur_doc_id = 0;
@@ -72,7 +71,7 @@ void construct_doc_len_list(
 bool read_doc_len_entry(
     const SafeFile& in_file,
     unsigned long long* const ptr_offset,
-    unsigned char* const ptr_freq
+    unsigned int* const ptr_freq
 ) {
     size_t arg_count;
     long initial_pos = ftell(in_file.get());
@@ -98,12 +97,12 @@ bool read_doc_len_entry(
 
 void read_doc_len_list(
     const fs::path& in_dir,
-    std::vector<unsigned char>& doc_len_list
+    std::vector<unsigned int>& doc_len_list
 ) {
     SafeFile in_file(in_dir, "rb");
     unsigned long long doc_id = 0;
     unsigned long long delta;
-    unsigned char freq;
+    unsigned int freq;
     while (read_doc_len_entry(in_file, &delta, &freq)) {
         doc_id += delta;
         doc_len_list.resize(std::max((size_t)doc_id + 1, doc_len_list.size()), 0);

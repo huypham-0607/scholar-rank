@@ -72,6 +72,7 @@ target_link_libraries(build_inverted_blocks PRIVATE scholar_rank_core)
 add_executable(build_doc_len_list apps/build_doc_len_list.cpp)
 target_link_libraries(build_doc_len_list PRIVATE scholar_rank_core)
 # Adding tests
+enable_testing()
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
 FetchContent_MakeAvailable(googletest)
 
@@ -81,10 +82,30 @@ target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
 add_executable(file_io_tests tests/utils/file_io_tests.cpp)
 target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
-add_executable(index_builder_tests tests/retrieval/index_builder_tests.cpp)
-target_link_libraries(index_builder_tests PRIVATE scholar_rank_core GTest::gtest_main)
+add_executable(posting_list_tests tests/retrieval/posting_list_tests.cpp)
+target_link_libraries(posting_list_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(bm25_tests tests/retrieval/bm25_tests.cpp)
+target_link_libraries(bm25_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(token_stream_tests tests/retrieval/token_stream_tests.cpp)
+target_link_libraries(token_stream_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(construct_inverted_blocks_tests tests/retrieval/construct_inverted_blocks_tests.cpp)
+target_link_libraries(construct_inverted_blocks_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(construct_doc_len_list_tests tests/retrieval/construct_doc_len_list_tests.cpp)
+target_link_libraries(construct_doc_len_list_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+add_executable(merge_inverted_blocks_tests tests/retrieval/merge_inverted_blocks_tests.cpp)
+target_link_libraries(merge_inverted_blocks_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(vbe_tests)
 gtest_discover_tests(file_io_tests)
-gtest_discover_tests(index_builder_tests)
+gtest_discover_tests(posting_list_tests)
+gtest_discover_tests(bm25_tests)
+gtest_discover_tests(token_stream_tests)
+gtest_discover_tests(construct_inverted_blocks_tests)
+gtest_discover_tests(construct_doc_len_list_tests)
+gtest_discover_tests(merge_inverted_blocks_tests)
