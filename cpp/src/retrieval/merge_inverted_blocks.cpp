@@ -37,16 +37,14 @@ namespace fs = std::filesystem;
 
 BlockMeta::BlockMeta(
     unsigned long long _doc_id,
-    unsigned int _file_index,
     size_t _start_addr,
     float _block_ub
 ) :
 doc_id(_doc_id),
-file_index(_file_index),
 start_addr(_start_addr),
 block_ub(_block_ub) {}
 
-TermMeta::TermMeta() : term_ub(0.0f), max_doc_id(0), doc_count(0) {}
+TermMeta::TermMeta() : term_ub(0.0f), max_doc_id(0), doc_count(0), file_index(0) {}
 
 // <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
 class Stream {
@@ -191,7 +189,6 @@ private:
 BlockMeta flush_buffer(
     PostingList& buffer,
     const SafeFile& out_file,
-    const unsigned int file_index,
     const std::vector<unsigned int>& doc_len_list,
     const float avgdl,
     const float k1,
@@ -222,7 +219,7 @@ BlockMeta flush_buffer(
 
     buffer.clear();
 
-    return BlockMeta(start_doc_id, file_index, start_addr, max_saturation);
+    return BlockMeta(start_doc_id, start_addr, max_saturation);
 }
 
 size_t build_posting_list(
@@ -252,6 +249,7 @@ size_t build_posting_list(
     }
 
     TermMeta& term_meta = term_meta_mapping[term];
+    term_meta.file_index = file_index;
     PostingList buffer;
     size_t total_size = 0;
 
@@ -268,7 +266,7 @@ size_t build_posting_list(
 
         if (is_new_doc && (int)buffer.size() == block_size) {
             term_meta.block_meta_list.push_back(flush_buffer(
-                buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
+                buffer, out_file, doc_len_list, avgdl, k1, b,
                 total_size
             ));
         }
@@ -288,7 +286,7 @@ size_t build_posting_list(
 
     if (buffer.size() > 0) {
         term_meta.block_meta_list.push_back(flush_buffer(
-            buffer, out_file, file_index, doc_len_list, avgdl, k1, b,
+            buffer, out_file, doc_len_list, avgdl, k1, b,
             total_size
         ));
     }
@@ -311,8 +309,12 @@ size_t build_posting_list(
 /**
  * @brief Serialize term_meta_mapping into a single consolidated file:
  * for each term, (term_size, term_bytes, term_ub, max_doc_id, doc_count,
- * block_count), followed by block_count blocks of
- * (delta<vbe>, file_index, start_addr, block_ub).
+ * file_index, block_count), followed by block_count blocks of
+ * (delta<vbe>, start_addr, block_ub).
+ *
+ * file_index is written once per term, not once per block - every block
+ * belonging to a term lands in the same posting_*.bin file, since
+ * build_posting_list writes a whole term in one call (see TermMeta).
  *
  * No leading term count - read_block_meta_file reads until a clean EOF.
  */
@@ -330,6 +332,7 @@ void write_block_meta_file(
         fwrite(&term_meta.term_ub, sizeof(term_meta.term_ub), 1, out_file.get());
         fwrite(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1, out_file.get());
         fwrite(&term_meta.doc_count, sizeof(term_meta.doc_count), 1, out_file.get());
+        fwrite(&term_meta.file_index, sizeof(term_meta.file_index), 1, out_file.get());
 
         unsigned int block_count = term_meta.block_meta_list.size();
         fwrite(&block_count, sizeof(block_count), 1, out_file.get());
@@ -342,7 +345,6 @@ void write_block_meta_file(
 
             int encode_length = vbe_encode(delta, vbe_buffer);
             fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
-            fwrite(&block.file_index, sizeof(block.file_index), 1, out_file.get());
             fwrite(&block.start_addr, sizeof(block.start_addr), 1, out_file.get());
             fwrite(&block.block_ub, sizeof(block.block_ub), 1, out_file.get());
         }
@@ -366,6 +368,7 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
         in_file.fread(&term_meta.term_ub, sizeof(term_meta.term_ub), 1);
         in_file.fread(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1);
         in_file.fread(&term_meta.doc_count, sizeof(term_meta.doc_count), 1);
+        in_file.fread(&term_meta.file_index, sizeof(term_meta.file_index), 1);
 
         unsigned int block_count;
         in_file.fread(&block_count, sizeof(block_count), 1);
@@ -376,14 +379,12 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
             read_vbe(in_file.get(), vbe_buffer);
             cur_start_doc_id += vbe_decode(vbe_buffer);
 
-            unsigned int file_index;
             size_t start_addr;
             float block_ub;
-            in_file.fread(&file_index, sizeof(file_index), 1);
             in_file.fread(&start_addr, sizeof(start_addr), 1);
             in_file.fread(&block_ub, sizeof(block_ub), 1);
 
-            term_meta.block_meta_list.push_back(BlockMeta(cur_start_doc_id, file_index, start_addr, block_ub));
+            term_meta.block_meta_list.push_back(BlockMeta(cur_start_doc_id, start_addr, block_ub));
         }
 
         result.push_back({term, term_meta});

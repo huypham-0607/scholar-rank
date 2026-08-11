@@ -19,13 +19,11 @@
  */
 struct BlockMeta {
     unsigned long long doc_id;
-    unsigned int file_index;
     size_t start_addr;
     float block_ub;
 
     BlockMeta(
         unsigned long long _doc_id,
-        unsigned int _file_index,
         size_t _start_addr,
         float _block_ub
     );
@@ -34,11 +32,17 @@ struct BlockMeta {
 /**
  * @brief Per-term BMW metadata: the term-level upper bound plus the list
  * of this term's blocks.
+ *
+ * file_index lives here, not on BlockMeta: build_posting_list writes one
+ * term's entire posting list in a single call, so every block it produces
+ * for that term always lands in whichever posting_*.bin file was open at
+ * the time - a term's blocks never span multiple files.
  */
 struct TermMeta {
     float term_ub;
     unsigned long long max_doc_id;
     unsigned int doc_count;
+    unsigned int file_index;
     std::vector<BlockMeta> block_meta_list;
 
     TermMeta();

@@ -3,6 +3,10 @@
 
 #include <filesystem>
 #include <vector>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 namespace fs = std::filesystem;
 
@@ -35,6 +39,29 @@ public:
     void close();
 private:
     FILE* fp;
+    fs::path file_path;
+};
+
+/**
+ * @brief C style Mmap wrapper for safe file descriptor handling.
+ * 
+ */
+class SafeFileMmap {
+public:
+    SafeFileMmap(fs::path _file_path);
+    ~SafeFileMmap();
+
+    SafeFileMmap(const SafeFileMmap&) = delete;
+    SafeFileMmap& operator=(const SafeFileMmap&) = delete;
+
+    SafeFileMmap(SafeFileMmap&& other) noexcept;
+    SafeFileMmap& operator=(SafeFileMmap&& other) noexcept;
+
+    const unsigned char operator[](size_t idx) const;
+    
+private:
+    struct stat sb;
+    unsigned char* data;
     fs::path file_path;
 };
 

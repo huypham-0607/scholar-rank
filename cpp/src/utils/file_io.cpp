@@ -1,9 +1,14 @@
 #include "scholar_rank/utils/file_io.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <vector>
 #include <algorithm>
 #include <format>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 namespace fs = std::filesystem;
 
@@ -87,6 +92,78 @@ bool SafeFile::fwrite(void* const buffer, const std::size_t size, const std::siz
         ));
     }
     return true;
+}
+
+
+SafeFileMmap::SafeFileMmap(fs::path _file_path) :file_path(_file_path) {
+    int fd = open(file_path.string().c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        throw std::runtime_error(std::format(
+            "Error opening file {}", file_path.string()
+        ));
+    }
+
+    struct stat sb;
+    if (fstat(fd,&sb) == -1) {
+        close(fd);
+        throw std::runtime_error(std::format(
+            "Error getting file size for {}", file_path.string()
+        ));
+    }
+    if (sb.st_size == 0) {
+        close(fd);
+        throw std::runtime_error(std::format(
+            "SafeFileMmap disallow opening empty file {}", file_path.string()
+        ));
+    }
+
+    data = static_cast<unsigned char*>(
+        mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0)
+    );
+    close(fd);
+
+    if (data == MAP_FAILED) {
+        throw std::runtime_error(std::format(
+            "Error while memory-mapping file {}", file_path.string()
+        ));
+    }
+    
+}
+
+SafeFileMmap::~SafeFileMmap() {
+    if (data != NULL) {
+        munmap(data, sb.st_size);
+    }
+}
+
+SafeFileMmap::SafeFileMmap(SafeFileMmap&& other) noexcept: sb(other.sb), data(other.data), file_path(other.file_path) {
+    other.data = nullptr;
+    other.file_path = fs::path();
+}
+
+SafeFileMmap& SafeFileMmap::operator=(SafeFileMmap&& other) noexcept {
+    if (this != &other) {
+        if (data != nullptr) {
+            munmap(data, sb.st_size);
+        }
+        data = other.data;
+        sb = other.sb;
+        file_path = other.file_path;
+
+        other.data = nullptr;
+        other.file_path = fs::path();
+    }
+    return *this;
+}
+
+const unsigned char SafeFileMmap::operator[](size_t idx) const {
+    if (idx >= sb.st_size) {
+        throw std::runtime_error(std::format(
+            "Index {} out of bound for object SafeFileMmap.",
+            idx
+        ));
+    }
+    return data[idx];
 }
 
 std::vector<fs::path> glob_files(

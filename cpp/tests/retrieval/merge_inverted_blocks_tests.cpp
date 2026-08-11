@@ -203,7 +203,7 @@ namespace MergeInvertedBlocksTest {
         EXPECT_NEAR(tm["alpha"].term_ub, 0.372295f, 1e-4);
 
         EXPECT_EQ(
-            read_postings(tm["alpha"].block_meta_list[1].file_index, tm["alpha"].block_meta_list[1].start_addr, 2),
+            read_postings(tm["alpha"].file_index, tm["alpha"].block_meta_list[1].start_addr, 2),
             (std::vector<std::pair<unsigned long long, unsigned int>>{{2,1},{3,1}})
         );
 
@@ -213,7 +213,7 @@ namespace MergeInvertedBlocksTest {
         EXPECT_NEAR(tm["zeta"].block_meta_list[0].block_ub, 2.691042f, 1e-3);
         EXPECT_NEAR(tm["zeta"].term_ub, 2.691042f, 1e-3);
         EXPECT_EQ(
-            read_postings(tm["zeta"].block_meta_list[0].file_index, tm["zeta"].block_meta_list[0].start_addr, 1),
+            read_postings(tm["zeta"].file_index, tm["zeta"].block_meta_list[0].start_addr, 1),
             (std::vector<std::pair<unsigned long long, unsigned int>>{{6,1}})
         );
     }
@@ -260,7 +260,7 @@ namespace MergeInvertedBlocksTest {
         ASSERT_EQ(omega.block_meta_list.size(), 1);
 
         auto postings = read_postings(
-            omega.block_meta_list[0].file_index, omega.block_meta_list[0].start_addr, 2
+            omega.file_index, omega.block_meta_list[0].start_addr, 2
         );
         ASSERT_EQ(postings.size(), 2);
         EXPECT_EQ(postings[0], (std::pair<unsigned long long, unsigned int>{5, 1}));
@@ -299,9 +299,9 @@ namespace MergeInvertedBlocksTest {
         ASSERT_EQ(tm["bbb"].block_meta_list.size(), 1);
         ASSERT_EQ(tm["ccc"].block_meta_list.size(), 1);
 
-        unsigned int aaa_file = tm["aaa"].block_meta_list[0].file_index;
-        unsigned int bbb_file = tm["bbb"].block_meta_list[0].file_index;
-        unsigned int ccc_file = tm["ccc"].block_meta_list[0].file_index;
+        unsigned int aaa_file = tm["aaa"].file_index;
+        unsigned int bbb_file = tm["bbb"].file_index;
+        unsigned int ccc_file = tm["ccc"].file_index;
 
         EXPECT_EQ(aaa_file, bbb_file) << "the term that crosses split_size still lands in the file already open";
         EXPECT_NE(bbb_file, ccc_file) << "the *next* term after crossing split_size should roll to a new file";

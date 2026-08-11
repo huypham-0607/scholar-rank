@@ -105,9 +105,13 @@ Shared pieces both later stages depend on: `posting_list.cpp` (`PostingItem`/`Po
 
 | Array | Contents | Purpose |
 |---|---|---|
-| Block metadata (`BlockMeta`, in `block_meta.bin`) | `doc_id` (block's start doc), `file_index`, `start_addr`, `block_ub` | Scanned to decide skip/no-skip *without* touching postings |
+| Block metadata (`BlockMeta`, in `block_meta.bin`) | `doc_id` (block's start doc), `start_addr`, `block_ub` | Scanned to decide skip/no-skip *without* touching postings |
 | Posting data (`posting_*.bin`) | `doc_id` delta + `tf`, sorted, delta-encoding resets at each block boundary | Only read for blocks that survive pruning |
 
+- **`file_index` lives on `TermMeta`, not `BlockMeta`**: `build_posting_list` writes one term's entire posting
+  list in a single call, so every block it produces for that term always lands in whichever `posting_*.bin`
+  file was open at the time — a term's blocks never span multiple files, so storing `file_index` per-block was
+  pure redundancy (one term can have many blocks, each paying for the same repeated 4 bytes).
 - **Block size**: a fixed posting count per block (constructor parameter, default 128), not a byte budget.
 - **Score vs. impact, resolved**: `block_ub`/`term_ub` store the *full* BM25 upper bound (`IDF * saturation`),
   not raw impact. This ties the index to whatever `k1`/`b` it was built with — retuning needs a full rebuild —
