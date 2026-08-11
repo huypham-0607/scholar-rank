@@ -53,11 +53,15 @@ void query (
 }
 
 class PostingPointer {
+public:
     PostingPointer(
-        std::string term,
+        const std::string term,
         const std::unordered_map<std::string, TermMeta> &term_meta_mapping,
-        const std::unordered_map<unsigned int, SafeFileMmap> &file_Index_mapping
+        const std::unordered_map<unsigned int, SafeFileMmap> &file_index_mapping
     ) {
-
+        
     }
+private:
+    TermMeta& term_meta;
+    SafeFileMmap& posting_file;
 };

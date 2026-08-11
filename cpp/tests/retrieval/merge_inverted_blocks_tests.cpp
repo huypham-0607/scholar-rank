@@ -319,4 +319,189 @@ namespace MergeInvertedBlocksTest {
             (std::vector<std::pair<unsigned long long, unsigned int>>{{2,1}})
         );
     }
+
+    TEST_F(MergeInvertedBlocksTest, MergeInvertedBlocksWritesMetadataFile) {
+        write_doc_len_list({{0,1},{1,1}});
+        write_raw_block_multi("block_0000.bin", {
+            {"aaa", {{0,1}}},
+            {"bbb", {{1,1}}},
+        });
+
+        merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, /*k1=*/1.3f, /*b=*/0.6f, /*block_size=*/4, /*split_size=*/(1ull << 20));
+
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_NO_THROW(read_metadata(merge_dir / "metadata.txt", posting_dir, doc_len_dir, k1, b, block_size, split_size));
+
+        EXPECT_EQ(posting_dir, merge_dir);
+        EXPECT_EQ(doc_len_dir, doc_len_path());
+        EXPECT_NEAR(k1, 1.3f, 1e-4);
+        EXPECT_NEAR(b, 0.6f, 1e-4);
+        EXPECT_EQ(block_size, 4);
+        EXPECT_EQ(split_size, (1ull << 20));
+    }
+}
+
+namespace MetadataTest {
+    class MetadataTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+
+        // Writes a metadata file directly, bypassing write_metadata, so
+        // malformed/incomplete files can be constructed for error-path
+        // tests.
+        void write_raw_metadata(const fs::path& path, const std::string& content) {
+            SafeFile out(path, "w");
+            std::fwrite(content.data(), sizeof(char), content.size(), out.get());
+        }
+    };
+
+    TEST_F(MetadataTest, WriteThenReadRoundTrips) {
+        fs::path meta_path = tmp_path / "metadata.txt";
+        fs::path posting_dir = tmp_path / "posting";
+        fs::path doc_len_dir = tmp_path / "doclen";
+
+        write_metadata(meta_path, posting_dir, doc_len_dir, 1.2f, 0.75f, 128, (1ull << 30));
+
+        fs::path read_posting_dir, read_doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        read_metadata(meta_path, read_posting_dir, read_doc_len_dir, k1, b, block_size, split_size);
+
+        EXPECT_EQ(read_posting_dir, posting_dir);
+        EXPECT_EQ(read_doc_len_dir, doc_len_dir);
+        EXPECT_NEAR(k1, 1.2f, 1e-4);
+        EXPECT_NEAR(b, 0.75f, 1e-4);
+        EXPECT_EQ(block_size, 128);
+        EXPECT_EQ(split_size, (1ull << 30));
+    }
+
+    TEST_F(MetadataTest, WriteThenReadRoundTripsWithDifferentValues) {
+        // Regression guard against field-order/field-name mixups (eg. the
+        // earlier split_size/block_size key collision) - every field here
+        // is a distinct, individually-recognizable value.
+        fs::path meta_path = tmp_path / "metadata.txt";
+        fs::path posting_dir = tmp_path / "custom_posting_dir";
+        fs::path doc_len_dir = tmp_path / "custom_doclen_dir";
+
+        write_metadata(meta_path, posting_dir, doc_len_dir, 1.8f, 0.4f, 256, 12345678ull);
+
+        fs::path read_posting_dir, read_doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        read_metadata(meta_path, read_posting_dir, read_doc_len_dir, k1, b, block_size, split_size);
+
+        EXPECT_EQ(read_posting_dir, posting_dir);
+        EXPECT_EQ(read_doc_len_dir, doc_len_dir);
+        EXPECT_NEAR(k1, 1.8f, 1e-4);
+        EXPECT_NEAR(b, 0.4f, 1e-4);
+        EXPECT_EQ(block_size, 256);
+        EXPECT_EQ(split_size, 12345678ull);
+    }
+
+    TEST_F(MetadataTest, ReadThrowsOnMissingFile) {
+        fs::path meta_path = tmp_path / "does_not_exist.txt";
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_THROW(
+            read_metadata(meta_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            std::runtime_error
+        );
+    }
+
+    TEST_F(MetadataTest, ReadThrowsOnMalformedLine) {
+        fs::path meta_path = tmp_path / "malformed.txt";
+        write_raw_metadata(meta_path,
+            "posting_dir=/tmp/posting\n"
+            "this line has no equals sign\n"
+        );
+
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_THROW(
+            read_metadata(meta_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            std::runtime_error
+        );
+    }
+
+    TEST_F(MetadataTest, ReadThrowsOnUnknownKey) {
+        fs::path meta_path = tmp_path / "unknown_key.txt";
+        write_raw_metadata(meta_path,
+            "posting_dir=/tmp/posting\n"
+            "doc_len_dir=/tmp/doclen\n"
+            "k1=1.2\n"
+            "b=0.75\n"
+            "block_size=128\n"
+            "split_size=1073741824\n"
+            "not_a_real_field=42\n"
+        );
+
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_THROW(
+            read_metadata(meta_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            std::runtime_error
+        );
+    }
+
+    TEST_F(MetadataTest, ReadThrowsOnMissingRequiredField) {
+        fs::path meta_path = tmp_path / "missing_field.txt";
+        // split_size is never written.
+        write_raw_metadata(meta_path,
+            "posting_dir=/tmp/posting\n"
+            "doc_len_dir=/tmp/doclen\n"
+            "k1=1.2\n"
+            "b=0.75\n"
+            "block_size=128\n"
+        );
+
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_THROW(
+            read_metadata(meta_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            std::runtime_error
+        );
+    }
+
+    TEST_F(MetadataTest, ReadThrowsOnUnparseableNumericValue) {
+        fs::path meta_path = tmp_path / "bad_number.txt";
+        write_raw_metadata(meta_path,
+            "posting_dir=/tmp/posting\n"
+            "doc_len_dir=/tmp/doclen\n"
+            "k1=not_a_float\n"
+            "b=0.75\n"
+            "block_size=128\n"
+            "split_size=1073741824\n"
+        );
+
+        fs::path posting_dir, doc_len_dir;
+        float k1, b;
+        int block_size;
+        size_t split_size;
+        ASSERT_THROW(
+            read_metadata(meta_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            std::runtime_error
+        );
+    }
 }

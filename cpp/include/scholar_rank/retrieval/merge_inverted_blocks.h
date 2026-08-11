@@ -75,4 +75,46 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
     const std::filesystem::path& in_path
 );
 
+/**
+ * @brief Write index build metadata (posting_dir, doc_len_dir, k1, b,
+ * block_size, split_size) to a plain-text key=value file, one field per
+ * line - human-readable/hand-editable, unlike the binary posting/block-meta
+ * formats.
+ *
+ * @param out_path path to write the metadata file to
+ * @param posting_dir directory containing this index's posting_*.bin files
+ * @param doc_len_dir directory containing this index's doc_len_list.bin
+ * @param k1 BM25 k1 parameter the index was built with
+ * @param b BM25 b parameter the index was built with
+ * @param block_size BMW block size the index was built with
+ * @param split_size posting-file split threshold the index was built with
+ */
+void write_metadata(
+    const std::filesystem::path& out_path,
+    const std::filesystem::path& posting_dir,
+    const std::filesystem::path& doc_len_dir,
+    const float k1,
+    const float b,
+    const int block_size,
+    const size_t split_size
+);
+
+/**
+ * @brief Read back a metadata file written by write_metadata, populating
+ * every out-parameter. Throws std::runtime_error on a missing/unreadable
+ * file, a malformed or unrecognized line, an unparseable value, or if any
+ * required field is absent from the file.
+ *
+ * @param out_path path to the metadata file to read
+ */
+void read_metadata(
+    const std::filesystem::path& out_path,
+    std::filesystem::path& posting_dir,
+    std::filesystem::path& doc_len_dir,
+    float& k1,
+    float& b,
+    int& block_size,
+    size_t& split_size
+);
+
 #endif

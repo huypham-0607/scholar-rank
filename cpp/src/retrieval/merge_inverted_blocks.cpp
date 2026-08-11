@@ -393,6 +393,114 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
     return result;
 }
 
+void write_metadata(
+    const fs::path& out_path,
+    const fs::path& posting_dir,
+    const fs::path& doc_len_dir,
+    const float k1,
+    const float b,
+    const int block_size,
+    const size_t split_size
+) {
+    SafeFile out_file(out_path, "w");
+    int res = 0;
+    
+    res = (res || (std::fprintf(out_file.get(), "posting_dir=%s\n", posting_dir.string().c_str()) < 0));
+    res = (res || (std::fprintf(out_file.get(), "doc_len_dir=%s\n", doc_len_dir.string().c_str()) < 0));
+    res = (res || (std::fprintf(out_file.get(), "k1=%f\n", k1) < 0));
+    res = (res || (std::fprintf(out_file.get(), "b=%f\n", b) < 0));
+    res = (res || (std::fprintf(out_file.get(), "block_size=%d\n", block_size) < 0));
+    res = (res || (std::fprintf(out_file.get(), "split_size=%zu\n", split_size) < 0));
+
+    if (res) {
+        throw std::runtime_error(std::format(
+            "Failed to write metadata to {}",
+            out_path.string()
+        ));
+    }
+}
+
+void read_metadata(
+    const fs::path& out_path,
+    fs::path& posting_dir,
+    fs::path& doc_len_dir,
+    float& k1,
+    float& b,
+    int& block_size,
+    size_t& split_size
+) {
+    SafeFile in_file(out_path, "r");
+
+    bool has_posting_dir = false;
+    bool has_doc_len_dir = false;
+    bool has_k1 = false;
+    bool has_b = false;
+    bool has_block_size = false;
+    bool has_split_size = false;
+
+    constexpr size_t LINE_BUFFER_SIZE = 4096;
+    char line_buffer[LINE_BUFFER_SIZE];
+
+    while (std::fgets(line_buffer, LINE_BUFFER_SIZE, in_file.get()) != nullptr) {
+        std::string line(line_buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.empty()) continue;
+
+        auto eq = line.find('=');
+        if (eq == std::string::npos) {
+            throw std::runtime_error(std::format(
+                "Malformed metadata line in {}: \"{}\"", out_path.string(), line
+            ));
+        }
+        std::string key = line.substr(0, eq);
+        std::string val = line.substr(eq + 1);
+
+        try {
+            if (key == "posting_dir") {
+                posting_dir = val;
+                has_posting_dir = true;
+            } else if (key == "doc_len_dir") {
+                doc_len_dir = val;
+                has_doc_len_dir = true;
+            } else if (key == "k1") {
+                k1 = std::stof(val);
+                has_k1 = true;
+            } else if (key == "b") {
+                b = std::stof(val);
+                has_b = true;
+            } else if (key == "block_size") {
+                block_size = std::stoi(val);
+                has_block_size = true;
+            } else if (key == "split_size") {
+                split_size = std::stoull(val);
+                has_split_size = true;
+            } else {
+                throw std::runtime_error(std::format(
+                    "Unknown metadata key \"{}\" in {}", key, out_path.string()
+                ));
+            }
+        } catch (const std::invalid_argument&) {
+            throw std::runtime_error(std::format(
+                "Cannot parse value \"{}\" for key \"{}\" in {}", val, key, out_path.string()
+            ));
+        } catch (const std::out_of_range&) {
+            throw std::runtime_error(std::format(
+                "Value \"{}\" for key \"{}\" in {} is out of range", val, key, out_path.string()
+            ));
+        }
+    }
+
+    if (!has_posting_dir || !has_doc_len_dir || !has_k1 || !has_b || !has_block_size || !has_split_size) {
+        throw std::runtime_error(std::format(
+            "Metadata file {} is missing one or more required fields "
+            "(posting_dir, doc_len_dir, k1, b, block_size, split_size)",
+            out_path.string()
+        ));
+    }
+}
+
 void merge_inverted_blocks(
     const fs::path& doc_len_dir,
     const fs::path& in_dir,
@@ -489,4 +597,14 @@ void merge_inverted_blocks(
     }
 
     write_block_meta_file(out_dir / "block_meta.bin", term_meta_mapping);
+
+    write_metadata(
+        out_dir / "metadata.txt",
+        out_dir,
+        doc_len_dir,
+        k1,
+        b,
+        block_size,
+        split_size
+    );
 }
