@@ -103,7 +103,6 @@ SafeFileMmap::SafeFileMmap(fs::path _file_path) :file_path(_file_path) {
         ));
     }
 
-    struct stat sb;
     if (fstat(fd,&sb) == -1) {
         close(fd);
         throw std::runtime_error(std::format(

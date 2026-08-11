@@ -151,6 +151,145 @@ namespace SafeFileTest {
     }
 }
 
+namespace SafeFileMmapTest {
+    class SafeFileMmapTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+
+        void write_file(const fs::path& path, const std::string& content) {
+            SafeFile out_fp(path, "wb");
+            if (!content.empty()) {
+                size_t written = fwrite(content.data(), sizeof(char), content.size(), out_fp.get());
+                if (written != content.size()) {
+                    throw std::runtime_error("Failed to write test fixture file.");
+                }
+            }
+        }
+    };
+
+    TEST_F(SafeFileMmapTest, ConstructsAndReadsAllBytes) {
+        fs::path file_name = tmp_path / "mmap_basic.bin";
+        std::string payload = "hello mmap";
+        write_file(file_name, payload);
+
+        SafeFileMmap fp(file_name);
+        for (size_t i = 0; i < payload.size(); i++) {
+            EXPECT_EQ(fp[i], (unsigned char)payload[i]);
+        }
+    }
+
+    TEST_F(SafeFileMmapTest, ReadsContentSpanningMultiplePages) {
+        // Larger than a typical 4KB page, to catch any indexing bug that
+        // only shows up once the mapping spans multiple pages.
+        std::mt19937_64 mt(1234);
+        std::string content(10000, '\0');
+        for (char& c : content) {
+            c = static_cast<char>(rd(0, 255, mt));
+        }
+
+        fs::path file_name = tmp_path / "mmap_large.bin";
+        write_file(file_name, content);
+
+        SafeFileMmap fp(file_name);
+        for (size_t i = 0; i < content.size(); i++) {
+            ASSERT_EQ(fp[i], (unsigned char)content[i]) << "mismatch at index " << i;
+        }
+    }
+
+    TEST_F(SafeFileMmapTest, ThrowsOnMissingFile) {
+        fs::path file_name = tmp_path / "does_not_exist.bin";
+        ASSERT_THROW(SafeFileMmap fp(file_name), std::runtime_error);
+    }
+
+    TEST_F(SafeFileMmapTest, ThrowsOnEmptyFile) {
+        fs::path file_name = tmp_path / "empty.bin";
+        write_file(file_name, "");
+        ASSERT_THROW(SafeFileMmap fp(file_name), std::runtime_error);
+    }
+
+    TEST_F(SafeFileMmapTest, OutOfBoundsAccessThrows) {
+        fs::path file_name = tmp_path / "mmap_bounds.bin";
+        write_file(file_name, "abc");
+
+        SafeFileMmap fp(file_name);
+        ASSERT_THROW(fp[3], std::runtime_error);
+        ASSERT_THROW(fp[1000], std::runtime_error);
+    }
+
+    TEST_F(SafeFileMmapTest, LastValidIndexDoesNotThrow) {
+        fs::path file_name = tmp_path / "mmap_last_idx.bin";
+        std::string payload = "abcdef";
+        write_file(file_name, payload);
+
+        SafeFileMmap fp(file_name);
+        unsigned char last = 0;
+        ASSERT_NO_THROW(last = fp[payload.size() - 1]);
+        EXPECT_EQ(last, (unsigned char)'f');
+    }
+
+    TEST_F(SafeFileMmapTest, MoveConstructorTransfersOwnership) {
+        fs::path file_name = tmp_path / "mmap_move_ctor.bin";
+        std::string payload = "hello mmap";
+        write_file(file_name, payload);
+
+        SafeFileMmap original(file_name);
+        SafeFileMmap moved(std::move(original));
+
+        for (size_t i = 0; i < payload.size(); i++) {
+            EXPECT_EQ(moved[i], (unsigned char)payload[i]);
+        }
+        // `original` is moved-from and destructs at the end of this test;
+        // if the move ctor failed to null out its `data`, that destructor
+        // would double-munmap the mapping `moved` still owns.
+    }
+
+    TEST_F(SafeFileMmapTest, MoveAssignmentTransfersOwnership) {
+        fs::path file_a = tmp_path / "a.bin";
+        fs::path file_b = tmp_path / "b.bin";
+        write_file(file_a, "AAAA");
+        write_file(file_b, "BBBBBB");
+
+        SafeFileMmap dest(file_a);
+        EXPECT_EQ(dest[0], (unsigned char)'A');
+        {
+            SafeFileMmap source(file_b);
+            dest = std::move(source);
+            // source is moved-from and destructs at the end of this block -
+            // must not touch the mapping dest now owns.
+        }
+
+        ASSERT_EQ(dest[0], (unsigned char)'B');
+        for (size_t i = 0; i < 6; i++) {
+            EXPECT_EQ(dest[i], (unsigned char)"BBBBBB"[i]);
+        }
+    }
+
+    TEST_F(SafeFileMmapTest, DestructorReleasesMappingCleanly) {
+        fs::path file_name = tmp_path / "mmap_dtor.bin";
+        write_file(file_name, "destructor test payload");
+
+        {
+            SafeFileMmap fp(file_name);
+            EXPECT_EQ(fp[0], (unsigned char)'d');
+        } // destructor runs here
+
+        // File should still be intact and independently removable - proves
+        // the mapping (and the fd, already closed in the constructor) isn't
+        // held open past scope exit.
+        ASSERT_TRUE(fs::exists(file_name));
+        ASSERT_NO_THROW(fs::remove(file_name));
+    }
+}
+
 class GlobFilesTest : public testing::Test {
 protected:
 
