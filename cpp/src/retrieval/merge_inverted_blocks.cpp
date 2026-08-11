@@ -402,15 +402,18 @@ void write_metadata(
     const int block_size,
     const size_t split_size
 ) {
-    SafeFile out_file(out_path, "w");
+    // Human-readable copy, for inspection only - never read back by
+    // read_metadata. "%f" truncates to 6 digits after the decimal, which
+    // does not round-trip an IEEE-754 float exactly in general.
+    SafeFile txt_file(out_path, "w");
     int res = 0;
-    
-    res = (res || (std::fprintf(out_file.get(), "posting_dir=%s\n", posting_dir.string().c_str()) < 0));
-    res = (res || (std::fprintf(out_file.get(), "doc_len_dir=%s\n", doc_len_dir.string().c_str()) < 0));
-    res = (res || (std::fprintf(out_file.get(), "k1=%f\n", k1) < 0));
-    res = (res || (std::fprintf(out_file.get(), "b=%f\n", b) < 0));
-    res = (res || (std::fprintf(out_file.get(), "block_size=%d\n", block_size) < 0));
-    res = (res || (std::fprintf(out_file.get(), "split_size=%zu\n", split_size) < 0));
+
+    res = (res || (std::fprintf(txt_file.get(), "posting_dir=%s\n", posting_dir.string().c_str()) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "doc_len_dir=%s\n", doc_len_dir.string().c_str()) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "k1=%f\n", k1) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "b=%f\n", b) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "block_size=%d\n", block_size) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "split_size=%zu\n", split_size) < 0));
 
     if (res) {
         throw std::runtime_error(std::format(
@@ -418,10 +421,32 @@ void write_metadata(
             out_path.string()
         ));
     }
+
+    // Binary twin - authoritative, exact, what read_metadata actually
+    // parses. Same length-prefixed-string convention as write_block_meta_file
+    // uses for terms.
+    fs::path bin_path = out_path;
+    bin_path.replace_extension(".bin");
+    SafeFile bin_file(bin_path, "wb");
+
+    std::string posting_dir_str = posting_dir.string();
+    unsigned short posting_dir_len = posting_dir_str.size();
+    fwrite(&posting_dir_len, sizeof(posting_dir_len), 1, bin_file.get());
+    fwrite(posting_dir_str.c_str(), sizeof(char), posting_dir_len, bin_file.get());
+
+    std::string doc_len_dir_str = doc_len_dir.string();
+    unsigned short doc_len_dir_len = doc_len_dir_str.size();
+    fwrite(&doc_len_dir_len, sizeof(doc_len_dir_len), 1, bin_file.get());
+    fwrite(doc_len_dir_str.c_str(), sizeof(char), doc_len_dir_len, bin_file.get());
+
+    fwrite(&k1, sizeof(k1), 1, bin_file.get());
+    fwrite(&b, sizeof(b), 1, bin_file.get());
+    fwrite(&block_size, sizeof(block_size), 1, bin_file.get());
+    fwrite(&split_size, sizeof(split_size), 1, bin_file.get());
 }
 
 void read_metadata(
-    const fs::path& out_path,
+    const fs::path& in_path,
     fs::path& posting_dir,
     fs::path& doc_len_dir,
     float& k1,
@@ -429,76 +454,25 @@ void read_metadata(
     int& block_size,
     size_t& split_size
 ) {
-    SafeFile in_file(out_path, "r");
+    SafeFile in_file(in_path, "rb");
 
-    bool has_posting_dir = false;
-    bool has_doc_len_dir = false;
-    bool has_k1 = false;
-    bool has_b = false;
-    bool has_block_size = false;
-    bool has_split_size = false;
+    unsigned short posting_dir_len;
+    in_file.fread(&posting_dir_len, sizeof(posting_dir_len), 1);
+    std::string posting_dir_str(posting_dir_len, '\0');
+    in_file.fread(&posting_dir_str[0], sizeof(char), posting_dir_len);
+    posting_dir = posting_dir_str;
 
-    constexpr size_t LINE_BUFFER_SIZE = 4096;
-    char line_buffer[LINE_BUFFER_SIZE];
+    unsigned short doc_len_dir_len;
+    in_file.fread(&doc_len_dir_len, sizeof(doc_len_dir_len), 1);
+    std::string doc_len_dir_str(doc_len_dir_len, '\0');
+    in_file.fread(&doc_len_dir_str[0], sizeof(char), doc_len_dir_len);
+    doc_len_dir = doc_len_dir_str;
 
-    while (std::fgets(line_buffer, LINE_BUFFER_SIZE, in_file.get()) != nullptr) {
-        std::string line(line_buffer);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-            line.pop_back();
-        }
-        if (line.empty()) continue;
-
-        auto eq = line.find('=');
-        if (eq == std::string::npos) {
-            throw std::runtime_error(std::format(
-                "Malformed metadata line in {}: \"{}\"", out_path.string(), line
-            ));
-        }
-        std::string key = line.substr(0, eq);
-        std::string val = line.substr(eq + 1);
-
-        try {
-            if (key == "posting_dir") {
-                posting_dir = val;
-                has_posting_dir = true;
-            } else if (key == "doc_len_dir") {
-                doc_len_dir = val;
-                has_doc_len_dir = true;
-            } else if (key == "k1") {
-                k1 = std::stof(val);
-                has_k1 = true;
-            } else if (key == "b") {
-                b = std::stof(val);
-                has_b = true;
-            } else if (key == "block_size") {
-                block_size = std::stoi(val);
-                has_block_size = true;
-            } else if (key == "split_size") {
-                split_size = std::stoull(val);
-                has_split_size = true;
-            } else {
-                throw std::runtime_error(std::format(
-                    "Unknown metadata key \"{}\" in {}", key, out_path.string()
-                ));
-            }
-        } catch (const std::invalid_argument&) {
-            throw std::runtime_error(std::format(
-                "Cannot parse value \"{}\" for key \"{}\" in {}", val, key, out_path.string()
-            ));
-        } catch (const std::out_of_range&) {
-            throw std::runtime_error(std::format(
-                "Value \"{}\" for key \"{}\" in {} is out of range", val, key, out_path.string()
-            ));
-        }
-    }
-
-    if (!has_posting_dir || !has_doc_len_dir || !has_k1 || !has_b || !has_block_size || !has_split_size) {
-        throw std::runtime_error(std::format(
-            "Metadata file {} is missing one or more required fields "
-            "(posting_dir, doc_len_dir, k1, b, block_size, split_size)",
-            out_path.string()
-        ));
-    }
+    // Potentially add validations here.
+    in_file.fread(&k1, sizeof(k1), 1);
+    in_file.fread(&b, sizeof(b), 1);
+    in_file.fread(&block_size, sizeof(block_size), 1);
+    in_file.fread(&split_size, sizeof(split_size), 1);
 }
 
 void merge_inverted_blocks(

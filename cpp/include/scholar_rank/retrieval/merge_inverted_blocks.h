@@ -77,11 +77,15 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
 
 /**
  * @brief Write index build metadata (posting_dir, doc_len_dir, k1, b,
- * block_size, split_size) to a plain-text key=value file, one field per
- * line - human-readable/hand-editable, unlike the binary posting/block-meta
- * formats.
+ * block_size, split_size) in two forms: a plain-text key=value file at
+ * out_path, one field per line - for humans to read/inspect, never read
+ * back programmatically - and a binary twin at out_path with its extension
+ * replaced by ".bin" - the exact, length-prefixed-string + fixed-width-field
+ * encoding read_metadata actually parses.
  *
- * @param out_path path to write the metadata file to
+ *
+ * @param out_path path to write the human-readable metadata file to; the
+ * binary file is written alongside it with the same stem and a .bin extension
  * @param posting_dir directory containing this index's posting_*.bin files
  * @param doc_len_dir directory containing this index's doc_len_list.bin
  * @param k1 BM25 k1 parameter the index was built with
@@ -100,15 +104,14 @@ void write_metadata(
 );
 
 /**
- * @brief Read back a metadata file written by write_metadata, populating
- * every out-parameter. Throws std::runtime_error on a missing/unreadable
- * file, a malformed or unrecognized line, an unparseable value, or if any
- * required field is absent from the file.
+ * @brief Read back the binary metadata file written by write_metadata (the
+ * .bin twin, not the human-readable .txt), populating every out-parameter.
+ * Throws std::runtime_error on a missing/unreadable or truncated file.
  *
- * @param out_path path to the metadata file to read
+ * @param in_path path to the .bin metadata file to read
  */
 void read_metadata(
-    const std::filesystem::path& out_path,
+    const std::filesystem::path& in_path,
     std::filesystem::path& posting_dir,
     std::filesystem::path& doc_len_dir,
     float& k1,
