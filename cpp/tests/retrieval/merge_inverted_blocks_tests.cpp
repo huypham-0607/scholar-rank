@@ -144,6 +144,23 @@ namespace MergeInvertedBlocksTest {
             return out;
         }
 
+        // Reads count postings starting at (file_index, start_addr) and
+        // returns the file offset immediately after the last one read - for
+        // checking TermMeta.end_addr's strict-endpoint property directly,
+        // rather than hand-computing expected byte offsets.
+        size_t read_postings_end_addr(unsigned int file_index, size_t start_addr, int count) {
+            SafeFile fp(merge_dir / std::format("posting_{:04}.bin", file_index), "rb");
+            fseek(fp.get(), (long)start_addr, SEEK_SET);
+
+            for (int k = 0; k < count; k++) {
+                unsigned char buf[BUFFER_LIMIT];
+                read_vbe(fp.get(), buf);
+                unsigned int freq;
+                fread(&freq, sizeof(freq), 1, fp.get());
+            }
+            return (size_t)ftell(fp.get());
+        }
+
         std::unordered_map<std::string, TermMeta> run_merge(
             float k1 = 1.2f, float b = 0.75f, int block_size = 2, size_t split_size = (1ull << 30)
         ) {
@@ -183,13 +200,26 @@ namespace MergeInvertedBlocksTest {
 
         ASSERT_EQ(tm.size(), 6);
 
-        // doc_count / max_doc_id for every term.
-        EXPECT_EQ(tm["alpha"].doc_count, 6);   EXPECT_EQ(tm["alpha"].max_doc_id, 7);
-        EXPECT_EQ(tm["beta"].doc_count, 4);    EXPECT_EQ(tm["beta"].max_doc_id, 5);
-        EXPECT_EQ(tm["gamma"].doc_count, 4);   EXPECT_EQ(tm["gamma"].max_doc_id, 7);
-        EXPECT_EQ(tm["delta"].doc_count, 1);   EXPECT_EQ(tm["delta"].max_doc_id, 2);
-        EXPECT_EQ(tm["epsilon"].doc_count, 1); EXPECT_EQ(tm["epsilon"].max_doc_id, 2);
-        EXPECT_EQ(tm["zeta"].doc_count, 1);    EXPECT_EQ(tm["zeta"].max_doc_id, 6);
+        // doc_count for every term.
+        EXPECT_EQ(tm["alpha"].doc_count, 6);
+        EXPECT_EQ(tm["beta"].doc_count, 4);
+        EXPECT_EQ(tm["gamma"].doc_count, 4);
+        EXPECT_EQ(tm["delta"].doc_count, 1);
+        EXPECT_EQ(tm["epsilon"].doc_count, 1);
+        EXPECT_EQ(tm["zeta"].doc_count, 1);
+
+        // end_addr: [block_meta_list[0].start_addr, end_addr) must hold
+        // exactly this term's doc_count postings and nothing more or less
+        // (strict endpoint property).
+        for (const std::string& term : {"alpha", "beta", "gamma", "delta", "epsilon", "zeta"}) {
+            const TermMeta& term_meta = tm[term];
+            EXPECT_EQ(
+                read_postings_end_addr(
+                    term_meta.file_index, term_meta.block_meta_list[0].start_addr, term_meta.doc_count
+                ),
+                term_meta.end_addr
+            ) << "term \"" << term << "\" end_addr mismatch";
+        }
 
         // "alpha": 6 postings / block_size=2 -> 3 blocks: [0,1],[2,3],[5,7].
         // block_meta_list[i].doc_id is each block's absolute start_doc_id.
@@ -256,7 +286,6 @@ namespace MergeInvertedBlocksTest {
         ASSERT_EQ(tm.size(), 1);
         const TermMeta& omega = tm["omega"];
         EXPECT_EQ(omega.doc_count, 2) << "doc10 counted as two documents instead of one";
-        EXPECT_EQ(omega.max_doc_id, 10);
         ASSERT_EQ(omega.block_meta_list.size(), 1);
 
         auto postings = read_postings(
@@ -266,6 +295,49 @@ namespace MergeInvertedBlocksTest {
         EXPECT_EQ(postings[0], (std::pair<unsigned long long, unsigned int>{5, 1}));
         EXPECT_EQ(postings[1], (std::pair<unsigned long long, unsigned int>{10, 5}))
             << "doc10's freq should be merged 3+2=5, not left as two separate entries";
+
+        EXPECT_EQ(
+            read_postings_end_addr(omega.file_index, omega.block_meta_list[0].start_addr, omega.doc_count),
+            omega.end_addr
+        );
+    }
+
+    TEST_F(MergeInvertedBlocksTest, EndAddrMarksExclusiveEndOfTermsByteRange) {
+        write_doc_len_list({{0,1},{1,1},{2,1}});
+        write_raw_block_multi("block_0000.bin", {
+            {"aaa", {{0,1}}},
+            {"bbb", {{1,1},{2,1}}},
+        });
+
+        // block_size=128 comfortably exceeds either term's posting count,
+        // so each term lands in exactly one block, both in the same file
+        // (posting_0000.bin), written back to back: "aaa" first, "bbb"
+        // immediately after.
+        auto tm = run_merge(1.2f, 0.75f, /*block_size=*/128);
+
+        ASSERT_EQ(tm["aaa"].block_meta_list.size(), 1);
+        ASSERT_EQ(tm["bbb"].block_meta_list.size(), 1);
+
+        // Delta-encoding resets to 0 at each block's first item, so "aaa"'s
+        // sole posting (doc_id=0) VBE-encodes its delta (0) in 1 byte, plus
+        // a 4-byte freq = 5 bytes total. "bbb" starts immediately after.
+        EXPECT_EQ(tm["aaa"].block_meta_list[0].start_addr, 0u);
+        EXPECT_EQ(tm["aaa"].end_addr, 5u);
+        EXPECT_EQ(tm["bbb"].block_meta_list[0].start_addr, 5u);
+
+        // General property, not tied to the hand-verified byte count above:
+        // reading exactly doc_count postings from the first block's
+        // start_addr must land the cursor exactly on end_addr - no gap,
+        // no overlap into whatever comes next.
+        for (const std::string& term : {"aaa", "bbb"}) {
+            const TermMeta& term_meta = tm[term];
+            EXPECT_EQ(
+                read_postings_end_addr(
+                    term_meta.file_index, term_meta.block_meta_list[0].start_addr, term_meta.doc_count
+                ),
+                term_meta.end_addr
+            ) << "term \"" << term << "\" end_addr mismatch";
+        }
     }
 
     TEST_F(MergeInvertedBlocksTest, EmptyBlockDirProducesEmptyBlockMetaFile) {

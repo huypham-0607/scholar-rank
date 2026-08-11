@@ -37,10 +37,18 @@ struct BlockMeta {
  * term's entire posting list in a single call, so every block it produces
  * for that term always lands in whichever posting_*.bin file was open at
  * the time - a term's blocks never span multiple files.
+ *
+ * end_addr is the exclusive end of this term's byte range in that file:
+ * every (doc_id, freq) posting for this term lies in
+ * [block_meta_list[0].start_addr, end_addr) - a strict half-open interval,
+ * so end_addr itself is one past the last valid byte. Combined with the
+ * first block's start_addr, this gives a hard, self-contained bound for
+ * safe reads/seeks over this term's data without depending on adjacent
+ * terms' placement.
  */
 struct TermMeta {
     float term_ub;
-    unsigned long long max_doc_id;
+    size_t end_addr;
     unsigned int doc_count;
     unsigned int file_index;
     std::vector<BlockMeta> block_meta_list;

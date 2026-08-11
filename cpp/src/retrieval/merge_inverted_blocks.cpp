@@ -44,7 +44,7 @@ doc_id(_doc_id),
 start_addr(_start_addr),
 block_ub(_block_ub) {}
 
-TermMeta::TermMeta() : term_ub(0.0f), max_doc_id(0), doc_count(0), file_index(0) {}
+TermMeta::TermMeta() : term_ub(0.0f), end_addr(0), doc_count(0), file_index(0) {}
 
 // <term_size><posting_list_size><term><<vbe_encoding_{i}><freq_{i}>>
 class Stream {
@@ -274,7 +274,6 @@ size_t build_posting_list(
         item_heap.pop();
         buffer.add_document(item.doc_id, item.freq);
         if (is_new_doc) {
-            term_meta.max_doc_id = item.doc_id;
             ++term_meta.doc_count;
         }
 
@@ -290,6 +289,10 @@ size_t build_posting_list(
             total_size
         ));
     }
+
+    // Exclusive end of this term's byte range - every write for this term
+    // just finished, so the file cursor is now one past its last byte.
+    term_meta.end_addr = (size_t)ftell(out_file.get());
 
     // df_t (term_meta.doc_count) is only known now that the term's heap is
     // fully drained - apply IDF retroactively to every block this term
@@ -308,7 +311,7 @@ size_t build_posting_list(
 
 /**
  * @brief Serialize term_meta_mapping into a single consolidated file:
- * for each term, (term_size, term_bytes, term_ub, max_doc_id, doc_count,
+ * for each term, (term_size, term_bytes, term_ub, end_addr, doc_count,
  * file_index, block_count), followed by block_count blocks of
  * (delta<vbe>, start_addr, block_ub).
  *
@@ -330,7 +333,7 @@ void write_block_meta_file(
         fwrite(term.c_str(), sizeof(char), term_size, out_file.get());
 
         fwrite(&term_meta.term_ub, sizeof(term_meta.term_ub), 1, out_file.get());
-        fwrite(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1, out_file.get());
+        fwrite(&term_meta.end_addr, sizeof(term_meta.end_addr), 1, out_file.get());
         fwrite(&term_meta.doc_count, sizeof(term_meta.doc_count), 1, out_file.get());
         fwrite(&term_meta.file_index, sizeof(term_meta.file_index), 1, out_file.get());
 
@@ -366,7 +369,7 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
 
         TermMeta term_meta;
         in_file.fread(&term_meta.term_ub, sizeof(term_meta.term_ub), 1);
-        in_file.fread(&term_meta.max_doc_id, sizeof(term_meta.max_doc_id), 1);
+        in_file.fread(&term_meta.end_addr, sizeof(term_meta.end_addr), 1);
         in_file.fread(&term_meta.doc_count, sizeof(term_meta.doc_count), 1);
         in_file.fread(&term_meta.file_index, sizeof(term_meta.file_index), 1);
 
