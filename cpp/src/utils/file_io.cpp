@@ -155,7 +155,7 @@ SafeFileMmap& SafeFileMmap::operator=(SafeFileMmap&& other) noexcept {
     return *this;
 }
 
-const unsigned char SafeFileMmap::operator[](size_t idx) const {
+unsigned char SafeFileMmap::operator[](size_t idx) const {
     if (idx >= sb.st_size) {
         throw std::runtime_error(std::format(
             "Index {} out of bound for object SafeFileMmap.",

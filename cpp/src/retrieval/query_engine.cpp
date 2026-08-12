@@ -24,220 +24,203 @@
 namespace fs = std::filesystem;
 
 
-void get_new_candidate() {
-
+PostingPointer::PostingPointer(
+    const std::string _term,
+    const int _block_size,
+    std::unordered_map<std::string, TermMeta> &term_meta_mapping,
+    std::unordered_map<unsigned int, SafeFileMmap> &file_index_mapping
+) : term(_term) {
+    if (term_meta_mapping.find(term) == term_meta_mapping.end()) {
+        throw std::runtime_error(std::format(
+            "Unable to initialize PostingPointer: Term {} not found in term_meta_mapping",
+            term
+        ));
+    }
+    term_meta = &(term_meta_mapping[term]);
+    auto file_it = file_index_mapping.find(term_meta->file_index);
+    if (file_it == file_index_mapping.end()) {
+        throw std::runtime_error(std::format(
+            "Unable to initialize PostingPointer: file_index {} not found in file_index_mapping",
+            term_meta->file_index
+        ));    
+    }
+    block_size = _block_size;
+    posting_file = &(file_it->second);
+    cur_block_id = 0;
+    cur_addr = term_meta->block_meta_list[0].start_addr;
+    doc_id = term_meta->block_meta_list[0].doc_id;
+    doc_pos = 0;
 }
 
-class PostingPointer {
-public:
-    PostingPointer(
-        const std::string _term,
-        const int _block_size,
-        std::unordered_map<std::string, TermMeta> &term_meta_mapping,
-        std::unordered_map<unsigned int, SafeFileMmap> &file_index_mapping
-    ) : term(_term) {
-        if (term_meta_mapping.find(term) == term_meta_mapping.end()) {
-            throw std::runtime_error(std::format(
-                "Unable to initialize PostingPointer: Term {} not found in term_meta_mapping",
-                term
-            ));
+int PostingPointer::get_cur_block_size(const int block_id) const {
+    if (block_id == static_cast<int>(term_meta->block_meta_list.size()) - 1) {
+        return term_meta->doc_count - block_size * block_id;
+    }
+    return block_size;
+}
+
+unsigned int PostingPointer::get_doc_count() const {
+    return term_meta->doc_count;
+}
+
+unsigned long long PostingPointer::get_doc_id() const {
+    return doc_id;
+}
+
+unsigned long long PostingPointer::get_block_id() const {
+    return cur_block_id;
+}
+
+unsigned long long PostingPointer::get_block_count() const {
+    return term_meta->block_meta_list.size();
+}
+
+unsigned long long PostingPointer::get_next_block_doc_id() const {
+    if (cur_block_id + 1 == static_cast<int>(term_meta->block_meta_list.size())) {
+        return MAX_DOC_ID;
+    }
+    else {
+        return term_meta->block_meta_list[cur_block_id + 1].doc_id;
+    }
+}
+
+float PostingPointer::get_term_upper_bound() const {
+    return term_meta->term_ub;
+}
+
+float PostingPointer::get_block_upper_bound() const {
+    if (cur_block_id == static_cast<int>(term_meta->block_meta_list.size())) {
+        throw std::runtime_error(std::format(
+            "Unable to get block upper_bound: cur_block_id {} exceeded range [0,{}).",
+            cur_block_id, term_meta->block_meta_list.size()
+        ));
+    }
+    return term_meta->block_meta_list[cur_block_id].block_ub;
+}
+
+unsigned int PostingPointer::get_frequency() const {
+    if (doc_id == MAX_DOC_ID) {
+        throw std::runtime_error(std::format(
+            "Unable to get entry frequency for doc_id {}.",
+            doc_id
+        ));
+    }
+    unsigned long long delta; unsigned int freq;
+    read_posting_entry(delta, freq);
+    return freq;
+}
+
+void PostingPointer::next_shallow(const unsigned long long target_doc_id) {
+    auto it = std::upper_bound(
+        term_meta->block_meta_list.begin(),
+        term_meta->block_meta_list.end(),
+        target_doc_id,
+        [&] (unsigned long long val, BlockMeta x) {
+            return val < x.doc_id;
         }
-        term_meta = &(term_meta_mapping[term]);
-        auto file_it = file_index_mapping.find(term_meta->file_index);
-        if (file_it == file_index_mapping.end()) {
-            throw std::runtime_error(std::format(
-                "Unable to initialize PostingPointer: file_index {} not found in file_index_mapping",
-                term_meta->file_index
-            ));    
-        }
-        block_size = _block_size;
-        posting_file = &(file_it->second);
-        cur_block_id = 0;
-        cur_addr = term_meta->block_meta_list[0].start_addr;
-        doc_id = term_meta->block_meta_list[0].doc_id;
+    );
+    int new_block = static_cast<int>((it - term_meta->block_meta_list.begin()) - 1);
+    
+    // Impossible given how BMW works.
+    if (new_block < cur_block_id) {
+        throw std::runtime_error(std::format(
+            "Unable to advance PostingPointer: new_block id {} is less than cur_block id {}.",
+            new_block, cur_block_id
+        ));
+    }
+
+    if (new_block > cur_block_id) {
+        cur_block_id = new_block;
+        cur_addr = term_meta->block_meta_list[new_block].start_addr;
+        doc_id = term_meta->block_meta_list[new_block].doc_id;
         doc_pos = 0;
     }
+}
 
-    const int get_cur_block_size(const int block_id) const {
-        if (block_id == term_meta->block_meta_list.size() - 1) {
-            return term_meta->doc_count - block_size * block_id;
-        }
-        return block_size;
-    }
+void PostingPointer::next(const unsigned long long target_doc_id) {
+    next_shallow(target_doc_id);
 
-    const unsigned int get_doc_count() const {
-        return term_meta->doc_count;
+    if (doc_id >= target_doc_id) {
+        return;
     }
     
-    const unsigned long long get_doc_id() const {
-        return doc_id;
-    }
-    
-    const unsigned long long get_block_id() const {
-        return cur_block_id;
+    unsigned long long delta;
+    unsigned int freq;
+    cur_addr += read_posting_entry(delta, freq);
+    for (int i = doc_pos+1; i < get_cur_block_size(cur_block_id); i++){
+        size_t entry_size = read_posting_entry(delta, freq);
+        doc_id += delta;
+        ++doc_pos;
+
+        if (doc_id >= target_doc_id) break;
+
+        cur_addr += entry_size;
     }
 
-    const unsigned long long get_block_count() const {
-        return term_meta->block_meta_list.size();
-    }
-
-    const unsigned long long get_next_block_doc_id() const {
-        if (cur_block_id + 1 == term_meta->block_meta_list.size()) {
-            return MAX_DOC_ID;
+    if (doc_id < target_doc_id) {
+        ++cur_block_id;
+        if (cur_block_id == static_cast<int>(term_meta->block_meta_list.size())) {
+            cur_addr = term_meta->end_addr;
+            doc_id = MAX_DOC_ID;
+            doc_pos = 0;
         }
         else {
-            return term_meta->block_meta_list[cur_block_id + 1].doc_id;
-        }
-    }
-
-    const float get_term_upper_bound() const {
-        return term_meta->term_ub;
-    }
-
-    const float get_block_upper_bound() const {
-        if (cur_block_id == term_meta->block_meta_list.size()) {
-            throw std::runtime_error(std::format(
-                "Unable to get block upper_bound: cur_block_id {} exceeded range [0,{}).",
-                cur_block_id, term_meta->block_meta_list.size()
-            ));
-        }
-        return term_meta->block_meta_list[cur_block_id].block_ub;
-    }
-
-    const unsigned int get_frequency() const {
-        if (doc_id == MAX_DOC_ID) {
-            throw std::runtime_error(std::format(
-                "Unable to get entry frequency for doc_id {}.",
-                doc_id
-            ));
-        }
-        unsigned long long delta; unsigned int freq;
-        read_posting_entry(delta, freq);
-        return freq;
-    }
-
-    void next_shallow(const unsigned long long target_doc_id) {
-        auto it = std::upper_bound(
-            term_meta->block_meta_list.begin(),
-            term_meta->block_meta_list.end(),
-            target_doc_id,
-            [&] (unsigned long long val, BlockMeta x) {
-                return val < x.doc_id;
-            }
-        );
-        int new_block = (it - term_meta->block_meta_list.begin()) - 1;
-        
-        // Impossible given how BMW works.
-        if (new_block < cur_block_id) {
-            throw std::runtime_error(std::format(
-                "Unable to advance PostingPointer: new_block id {} is less than cur_block id {}.",
-                new_block, cur_block_id
-            ));
-        }
-
-        if (new_block > cur_block_id) {
-            cur_block_id = new_block;
-            cur_addr = term_meta->block_meta_list[new_block].start_addr;
-            doc_id = term_meta->block_meta_list[new_block].doc_id;
+            cur_addr = term_meta->block_meta_list[cur_block_id].start_addr;
+            doc_id = term_meta->block_meta_list[cur_block_id].doc_id;
             doc_pos = 0;
         }
     }
+}
 
-    void next(const unsigned long long target_doc_id) {
-        next_shallow(target_doc_id);
 
-        if (doc_id >= target_doc_id) {
-            return;
+// Return size of the entry (for posting iteration)
+size_t PostingPointer::read_posting_entry(
+    unsigned long long &delta,
+    unsigned int &freq
+) const {
+    // Read VBE encoding
+    int idx = 0;
+    unsigned char buffer[BUFFER_LIMIT];
+    while (idx < BUFFER_LIMIT) {
+        buffer[idx] = (*posting_file)[cur_addr + idx];
+        if (buffer[idx] >= 128) {
+            break;
         }
-        
-        unsigned long long delta;
-        unsigned int freq;
-        cur_addr += read_posting_entry(delta, freq);
-        for (int i = doc_pos+1; i < get_cur_block_size(cur_block_id); i++){
-            size_t entry_size = read_posting_entry(delta, freq);
-            doc_id += delta;
-            ++doc_pos;
-
-            if (doc_id >= target_doc_id) break;
-
-            cur_addr += entry_size;
-        }
-
-        if (doc_id < target_doc_id) {
-            ++cur_block_id;
-            if (cur_block_id == term_meta->block_meta_list.size()) {
-                cur_addr = term_meta->end_addr;
-                doc_id = MAX_DOC_ID;
-                doc_pos = 0;
-            }
-            else {
-                cur_addr = term_meta->block_meta_list[cur_block_id].start_addr;
-                doc_id = term_meta->block_meta_list[cur_block_id].doc_id;
-                doc_pos = 0;
-            }
-        }
+        ++idx;
     }
-    
-private:
-    // Flagging this because behaviour when the mapped item is erased from unordered_map
-    std::string term;
-    TermMeta* term_meta;
-    SafeFileMmap* posting_file;
-    int block_size;
-    int cur_block_id;
-    size_t cur_addr;
-    unsigned long long doc_id;
-    int doc_pos;
 
-    // Return size of the entry (for posting iteration)
-    const size_t read_posting_entry(
-        unsigned long long &delta,
-        unsigned int &freq
-    ) const {
-        // Read VBE encoding
-        int idx = 0;
-        unsigned char buffer[BUFFER_LIMIT];
-        while (idx < BUFFER_LIMIT) {
-            buffer[idx] = (*posting_file)[cur_addr + idx];
-            if (buffer[idx] >= 128) {
-                break;
-            }
-            ++idx;
-        }
+    // VBE overflow
+    if (idx == BUFFER_LIMIT) {
+        throw std::runtime_error(std::format(
+            "Unable to read VBE Encoding in posting {}.",
+            term
+        ));
+    }
+    size_t vbe_size = idx + 1;
 
-        // VBE overflow
-        if (idx == BUFFER_LIMIT) {
-            throw std::runtime_error(std::format(
-                "Unable to read VBE Encoding in posting {}.",
-                term
-            ));
-        }
-        size_t vbe_size = idx + 1;
+    try {
+        delta = vbe_decode(buffer);
+    }
+    catch (const std::runtime_error&) {
+        throw std::runtime_error(std::format(
+            "Unable to convert VBE Encoding into 'unsigned long long' in posting {}.",
+            term
+        ));
+    }
 
-        try {
-            delta = vbe_decode(buffer);
-        }
-        catch (std::runtime_error) {
-            throw std::runtime_error(std::format(
-                "Unable to convert VBE Encoding into 'unsigned long long' in posting {}.",
-                term
-            ));
-        }
-
-        // Reading frequency
-        for (size_t i = 0; i < sizeof(unsigned int); i++) {
-            buffer[i] = (*posting_file)[cur_addr + vbe_size + i];
-        }
-        if constexpr (std::endian::native == std::endian::big) {
-            std::reverse(buffer, buffer + sizeof(unsigned int));
-        }
-        freq = 0;
-        for (size_t i = 0; i < sizeof(unsigned int); i++) {
-            freq += buffer[i] * (1<<(8*i));
-        }
-        return vbe_size + sizeof(unsigned int);
-    } 
-};
+    // Reading frequency
+    for (size_t i = 0; i < sizeof(unsigned int); i++) {
+        buffer[i] = (*posting_file)[cur_addr + vbe_size + i];
+    }
+    if constexpr (std::endian::native == std::endian::big) {
+        std::reverse(buffer, buffer + sizeof(unsigned int));
+    }
+    freq = 0;
+    for (size_t i = 0; i < sizeof(unsigned int); i++) {
+        freq += buffer[i] * (1<<(8*i));
+    }
+    return vbe_size + sizeof(unsigned int);
+}
 
 void sort_posting(std::vector<PostingPointer>& postings) {
     std::sort(postings.begin(), postings.end(), [&](const PostingPointer& a, const PostingPointer& b) {
@@ -247,13 +230,14 @@ void sort_posting(std::vector<PostingPointer>& postings) {
 
 int find_pivot(std::vector<PostingPointer>& postings, const float theta) {
     float running_score = 0.0;
-    for (int i = 0; i < postings.size(); i++) {
+    for (int i = 0; i < static_cast<int>(postings.size()); i++) {
         running_score += postings[i].get_term_upper_bound();
         if (running_score > theta) {
             return i;
         }
-        return postings.size();
     }
+    return static_cast<int>(postings.size());
+
 }
 
 bool check_block_max(std::vector<PostingPointer>& postings, const int pivot, const float theta) {
@@ -261,7 +245,7 @@ bool check_block_max(std::vector<PostingPointer>& postings, const int pivot, con
     
     float running_sum = 0.0;
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() <= doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
         running_sum += postings[idx].get_block_upper_bound();
         ++idx;
     }
@@ -271,7 +255,7 @@ bool check_block_max(std::vector<PostingPointer>& postings, const int pivot, con
 float evaluate_prefix(
     std::vector<PostingPointer>& postings,
     const int pivot,
-    std::vector<unsigned int> doc_len_list,
+    std::vector<unsigned int>& doc_len_list,
     const float avgdl,
     const float k1,
     const float b
@@ -279,7 +263,7 @@ float evaluate_prefix(
     float running_sum = 0.0;
     unsigned long long doc = postings[pivot].get_doc_id();
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() <= doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
         // Prefix of postings has to be tied run of doc_id = doc
         if (postings[idx].get_doc_id() != doc) {
             throw std::runtime_error(std::format(
@@ -288,7 +272,7 @@ float evaluate_prefix(
             ));
         }
 
-        const unsigned N = doc_len_list.size();
+        const unsigned long long N = doc_len_list.size();
         const unsigned int df_t = postings[idx].get_doc_count();
         const unsigned int tf = postings[idx].get_frequency();
         const float doc_len = doc_len_list[postings[idx].get_doc_id()];
@@ -306,7 +290,7 @@ void advance_prefix(
 ) {
     unsigned long long doc = postings[pivot].get_doc_id();
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() <= doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
         // Prefix of postings has to be tied run of doc_id = doc
         if (postings[idx].get_doc_id() != doc) {
             throw std::runtime_error(std::format(
@@ -325,7 +309,7 @@ void advance_one_excluding(
     std::vector<PostingPointer>& postings,
     const int pivot,
     const unsigned long long N,
-    const unsigned target_doc_id
+    const unsigned long long target_doc_id
 ) {
     unsigned long long doc = postings[pivot].get_doc_id();
     
@@ -333,7 +317,7 @@ void advance_one_excluding(
     int advance_id = -1;
 
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() < doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() < doc) {
 
         const float idf = std::log((float)N / (float)postings[idx].get_doc_count());
         if (idf > max_idf) {
@@ -360,20 +344,20 @@ unsigned long long get_new_candidate(
 
     unsigned long long target_doc_id = MAX_DOC_ID;
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() <= doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
         unsigned long long cand = postings[idx].get_next_block_doc_id();
         target_doc_id = std::min(target_doc_id, cand);
         ++idx;
     }
 
-    return MAX_DOC_ID;
+    return target_doc_id;
 }
 
 void advance_one_including(
     std::vector<PostingPointer>& postings,
     const int pivot,
     const unsigned long long N,
-    const unsigned target_doc_id
+    const unsigned long long target_doc_id
 ) {
     unsigned long long doc = postings[pivot].get_doc_id();
     
@@ -381,7 +365,7 @@ void advance_one_including(
     int advance_id = -1;
 
     int idx = 0;
-    while (idx < postings.size() && postings[idx].get_doc_id() <= doc) {
+    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
 
         const float idf = std::log((float)N / (float)postings[idx].get_doc_count());
         if (idf > max_idf) {
@@ -402,7 +386,7 @@ void advance_one_including(
 
 std::vector<std::pair<float, unsigned long long>> query (
     const fs::path meta_path,
-    const std::vector<std::string> query,
+    const std::vector<std::string> raw_terms,
     const int k
 ) {
     fs::path in_path, doc_len_path;
@@ -422,7 +406,7 @@ std::vector<std::pair<float, unsigned long long>> query (
     for (unsigned long long i = 0; i < doc_len_list.size(); i++) {
         total_doc_length += doc_len_list[i];
     }
-    const float avgdl = (float)total_doc_length/doc_len_list.size();
+    const float avgdl = (float)total_doc_length/(float)doc_len_list.size();
 
     // Load term_meta_mapping
     std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping = read_block_meta_file(
@@ -435,7 +419,7 @@ std::vector<std::pair<float, unsigned long long>> query (
 
     // Filtering terms not indexed
     std::vector<std::string> terms;
-    for (const auto& term : query) {
+    for (const auto& term : raw_terms) {
         if (term_meta_mapping.find(term) != term_meta_mapping.end()) {
             terms.push_back(term);
         }
@@ -474,7 +458,7 @@ std::vector<std::pair<float, unsigned long long>> query (
         float theta = top_k.top().first;
         int pivot = find_pivot(postings, theta);
 
-        if (pivot == postings.size()) break;
+        if (pivot == static_cast<int>(postings.size())) break;
         unsigned long long doc = postings[pivot].get_doc_id();
         if (doc == MAX_DOC_ID) break;
         
@@ -508,14 +492,14 @@ std::vector<std::pair<float, unsigned long long>> query (
             }
         }
         else {
-            int target_doc_id = get_new_candidate(postings, pivot);
+            unsigned long long target_doc_id = get_new_candidate(postings, pivot);
             advance_one_including(postings, pivot, doc_len_list.size(), target_doc_id);
         }
     }
 
     std::vector<std::pair<float, unsigned long long>> res;
     while (!top_k.empty()) {
-        res.push_back(top_k.top());
+        if (top_k.top().first != -1) res.push_back(top_k.top());
         top_k.pop();
     }
     return res;

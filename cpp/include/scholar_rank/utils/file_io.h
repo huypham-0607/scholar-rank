@@ -57,7 +57,7 @@ public:
     SafeFileMmap(SafeFileMmap&& other) noexcept;
     SafeFileMmap& operator=(SafeFileMmap&& other) noexcept;
 
-    const unsigned char operator[](size_t idx) const;
+    unsigned char operator[](size_t idx) const;
     
 private:
     struct stat sb;
