@@ -56,6 +56,7 @@ set(SCHOLAR_RANK_SOURCES
     src/retrieval/construct_inverted_blocks.cpp
     src/retrieval/construct_doc_len_list.cpp
     src/retrieval/merge_inverted_blocks.cpp
+    src/retrieval/query_engine.cpp
 )
 
 # Building a library scholar_rank_core compiled from SCHOLAR_RANK_SOURCES.
@@ -102,6 +103,9 @@ target_link_libraries(construct_doc_len_list_tests PRIVATE scholar_rank_core GTe
 add_executable(merge_inverted_blocks_tests tests/retrieval/merge_inverted_blocks_tests.cpp)
 target_link_libraries(merge_inverted_blocks_tests PRIVATE scholar_rank_core GTest::gtest_main)
 
+add_executable(query_engine_tests tests/retrieval/query_engine_tests.cpp)
+target_link_libraries(query_engine_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
 include(GoogleTest)
 gtest_discover_tests(vbe_tests)
 gtest_discover_tests(file_io_tests)
@@ -111,3 +115,4 @@ gtest_discover_tests(token_stream_tests)
 gtest_discover_tests(construct_inverted_blocks_tests)
 gtest_discover_tests(construct_doc_len_list_tests)
 gtest_discover_tests(merge_inverted_blocks_tests)
+gtest_discover_tests(query_engine_tests)

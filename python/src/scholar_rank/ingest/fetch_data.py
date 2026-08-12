@@ -265,7 +265,7 @@ def show_shard(shard_path: Path):
         Propagates any DuckDB error unhandled (e.g. shard_path doesn't exist or isn't
         valid parquet) — no try/except here.
     """
-    db = duckdb.connect();
+    db = duckdb.connect()
     rel = db.read_parquet(shard_path)
 
     rel.show()

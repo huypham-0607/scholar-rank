@@ -410,7 +410,7 @@ std::vector<std::pair<float, unsigned long long>> query (
 
     // Load term_meta_mapping
     std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping = read_block_meta_file(
-        in_path
+        in_path / "block_meta.bin"
     );
     std::unordered_map<std::string, TermMeta> term_meta_mapping;
     for (auto [term,metadata] : raw_term_meta_mapping) {
@@ -502,5 +502,6 @@ std::vector<std::pair<float, unsigned long long>> query (
         if (top_k.top().first != -1) res.push_back(top_k.top());
         top_k.pop();
     }
+    std::reverse(res.begin(), res.end());
     return res;
 }
