@@ -1,0 +1,10 @@
+[data-path]
+
+upstream_path = "data/parquet"
+tmp_data_path = "./data/raw"                # Storing raw transient shards fetched from OpenAlex 
+data_path = "/data/scholar_rank/data"                # Storing compacted shards after extraction
+posting_path = "/data/scholar_rank/posting"              # Store posting data
+
+
+[subset-profiles]
+"math-english" = "topics[1].field_display_name = 'Mathematics' AND language = 'en'"
