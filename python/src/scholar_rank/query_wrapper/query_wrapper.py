@@ -6,7 +6,7 @@ import struct
 from pathlib import Path
 from scholar_rank import get_logger, Tokenizer, scholar_rank_cpp
 
-def query(
+def retrieve(
     query_string: str,
     k: int,
     root_path: Path,

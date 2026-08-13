@@ -11,7 +11,7 @@ import argparse
 import tomllib
 
 from pathlib import Path
-from scholar_rank import EntityIngestor, WorksSubsetter, PROJECT_ROOT, get_logger, PostingBuildler
+from scholar_rank import EntityIngestor, WorksSubsetter, PROJECT_ROOT, get_logger, PostingBuildler, retrieve
 
 logger = get_logger(__name__)
 CONFIG_PATH = PROJECT_ROOT / "project-config.toml"
@@ -31,12 +31,12 @@ def get_profile_data_path(profile: str, config: dict) -> Path:
     paths = config["data-path"]
     return (
         resolve_path(paths["data-path"]) / paths["full-corpus-folder"] if (profile == "full-corpus")
-        else resolve_path(paths["data-path"]) / paths["works-subset-folder"] / get_subset_folder(args.profile)
+        else resolve_path(paths["data-path"]) / paths["works-subset-folder"] / get_subset_folder(profile)
     )
 
 def get_profile_posting_path(profile: str, config: dict) -> Path:
     paths = config["data-path"]
-    return resolve_path(paths["posting-path"]) / get_subset_folder(args.profile)
+    return resolve_path(paths["posting-path"]) / get_subset_folder(profile)
 
 def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
@@ -58,14 +58,33 @@ def cmd_gen_works_subset(args: argparse.Namespace, config: dict) -> None:
     subsetter.validate_database()
 
 def cmd_build_posting(args: argparse.Namespace, config: dict) -> None:
-    paths = config["data-path"]
     corpus_path = get_profile_data_path(args.profile, config)
     out_path = get_profile_posting_path(args.profile, config)
-    posting_builder = PostingBuildler(corpus_path, out_path)
+    posting_config = config["posting"]
+    posting_builder = PostingBuildler(
+        corpus_path,
+        out_path,
+        posting_config["lookup-folder"],
+        posting_config["lookup-file-name"],
+        posting_config["token-stream-folder"],
+        posting_config["posting-folder"],
+        posting_config["partial-folder"],
+    )
     posting_builder.build()
 
 def cmd_query(args: argparse.Namespace, config: dict) -> None:
-    pass
+    root_path = get_profile_posting_path(args.profile, config)
+    posting_folder = config["posting"]["posting-folder"] 
+    lookup_folder = config["posting"]["lookup-folder"] 
+    lookup_file_name = config["posting"]["lookup-file-name"] 
+    retrieve(
+        args.query,
+        args.k,
+        root_path,
+        posting_folder,
+        lookup_folder,
+        lookup_file_name
+    )
 
 def build_parser(config: dict) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scholar-rank")
@@ -117,7 +136,7 @@ def build_parser(config: dict) -> argparse.ArgumentParser:
         "--k",
         type=int,
         default=10,
-        help="Number of documents to retrieve."
+        help="Number of documents to retrieve, defaults to 10."
     )
     query_parser.add_argument(
         "--profile",

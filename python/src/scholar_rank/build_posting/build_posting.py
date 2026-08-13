@@ -56,9 +56,9 @@ class PostingBuildler:
 
         scholar_rank_cpp.build_doc_len(self.token_stream_path, self.posting_path)
         scholar_rank_cpp.build_inverted_blocks(
-            self.token_stream_path, 
+            self.token_stream_path,
             self.partial_path,
-            self.mem_limit
+            self.MEM_LIMIT
         )
         scholar_rank_cpp.merge_inverted_blocks(
             self.posting_path / scholar_rank_cpp.file_names.DOC_LEN_LIST,
@@ -66,6 +66,6 @@ class PostingBuildler:
             self.posting_path,
             self.K1,
             self.B,
-            self.block_size,
-            self.split_size
+            self.BLOCK_SIZE,
+            self.SPLIT_SIZE
         )
