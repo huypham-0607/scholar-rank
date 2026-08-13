@@ -1,41 +1,44 @@
-"""Subsetting full corpus for convenient testing.
+"""Makes a smaller Works subset from the full corpus, for development and testing.
 
+Driven by the CLI (scholar-rank gen-works-subset) and project-config.toml.
 """
 
 import duckdb as db
-import numpy as np
-import json
 import math
 
-from scholar_rank.ingest.fetch_data import get_manifest_data
-from dataclasses import dataclass
 from pathlib import Path
-from scholar_rank.utils import get_logger, PROJECT_ROOT, get_current_time
+from scholar_rank.utils import get_logger, get_current_time
 
 logger = get_logger(__name__)
 
-class Subsetter:
 
-    # ____________________ CONSTANTS __________________________
+class WorksSubsetter:
+    """Filters full_corpus_path/works by filter_condition, writes the result to subset_path.
+
+    full_corpus_path is the corpus root (the folder that holds works/), not works/ itself.
+    """
 
     def __init__(
         self,
-        compact_path: Path,
-        db_path: Path,
+        full_corpus_path: Path,
+        subset_path: Path,
         filter_condition: str,
         rows_per_chunk: int = 450000
     ):
-        logger.info("Initializing Subsetter.")
-        
-        self.COMPACT_PATH = compact_path
-        self.DB_PATH = db_path
-        self.FILTER_CONDITION = filter_condition
-        self.ROWS_PER_CHUNK = rows_per_chunk
+        logger.info("Initializing WorksSubsetter.")
 
-        logger.info("Finished initializing Subsetter.")
+        self.full_corpus_path = full_corpus_path
+        self.subset_path = subset_path
+        self.filter_condition = filter_condition
+        self.rows_per_chunk = rows_per_chunk
 
-    # Debug function
+        logger.info("Finished initializing WorksSubsetter.")
+
     def validate_database(self):
+        """Checks subset_path against full_corpus_path: filter match, duplicate IDs, link counts.
+
+        Writes database_validation_log.txt under subset_path.
+        """
         errors = []
 
         con = db.connect()
@@ -44,32 +47,34 @@ class Subsetter:
 
         ids = con.sql(f"""
             SELECT id
-            FROM read_parquet('{self.COMPACT_PATH}/works/**/*.parquet')
-            WHERE {self.FILTER_CONDITION};
+            FROM read_parquet('{self.full_corpus_path}/works/**/*.parquet')
+            WHERE {self.filter_condition};
 
         """).fetchall()
 
         ids = set(id[0] for id in ids)
         present = set()
 
+        # Re-runs filter_condition on each row instead of a fixed expected value, so
+        # this check stays correct no matter which profile built the subset.
         rel = con.sql(f"""
             SELECT id, referenced_works, referenced_works_count,
-            topics[1].field_display_name as field
-            FROM read_parquet('{str(self.DB_PATH)}/**/*.parquet')
+            ({self.filter_condition}) AS matches_filter
+            FROM read_parquet('{str(self.subset_path)}/**/*.parquet')
         """)
 
-        logger.info("First pass: Field + Duplicate ID + link mismatch check.")
+        logger.info("First pass: Filter-condition + Duplicate ID + link mismatch check.")
 
         while (row := rel.fetchone()) is not None:
-            data = dict(zip(rel.columns,row))
+            data = dict(zip(rel.columns, row))
 
-            if data["field"] != "Mathematics":
-                message = f"ID {data["id"]} is not in Mathematics field."
+            if not data["matches_filter"]:
+                message = f"ID {data["id"]} does not satisfy the filter condition."
                 logger.warning(message)
                 errors.append(message)
                 continue
             if data["id"] in present:
-                message = f"Duplicate ID {data["id"]} detected in math_subset.duckdb."
+                message = f"Duplicate ID {data["id"]} detected in subset."
                 logger.warning(message)
                 errors.append(message)
                 continue
@@ -79,11 +84,11 @@ class Subsetter:
                 logger.warning(message)
                 errors.append(message)
 
-        logger.info("Second pass: Missing valid Mathematics entries check.")
+        logger.info("Second pass: Missing valid subset entries check.")
 
         for id in ids:
             if id not in present:
-                message = f"ID {data["id"]} present in compact corpus but not in math_subset.duckdb."
+                message = f"ID {id} present in full corpus but not in subset."
                 logger.warning(message)
                 errors.append(message)
 
@@ -94,11 +99,11 @@ class Subsetter:
 
         rel = con.sql(f"""
             SELECT id, referenced_works, referenced_works_count
-            FROM read_parquet('{str(self.DB_PATH)}/**/*.parquet')
+            FROM read_parquet('{str(self.subset_path)}/**/*.parquet')
         """)
 
         while (row := rel.fetchone()) is not None:
-            data = dict(zip(rel.columns,row))
+            data = dict(zip(rel.columns, row))
 
             total_links += data["referenced_works_count"]
 
@@ -112,7 +117,7 @@ class Subsetter:
         logger.info(f"Total errors: {len(errors)}.")
 
         try:
-            with open(self.DB_PATH/"database_validation_log.txt", "w", encoding="utf-8") as f:
+            with open(self.subset_path/"database_validation_log.txt", "w", encoding="utf-8") as f:
                 f.write(f"Time created: {get_current_time()}.\n")
                 f.write(f"Total nodes: {len(present)}.\n")
                 f.write(f"Total links: {total_links}.\n")
@@ -122,14 +127,14 @@ class Subsetter:
                 for error in errors:
                     f.write(f"{error}\n")
         except Exception as e:
-            logger.warning(f"Failed to open extraction_log.txt: {e}")
+            logger.warning(f"Failed to open database_validation_log.txt: {e}")
             raise
 
     def subset_database(self):
+        """Filters full_corpus_path/works by filter_condition, writes subset_path in chunks."""
         logger.info("Connecting to DB.")
-        print(type(self.DB_PATH))
-        (self.DB_PATH).mkdir(parents=True, exist_ok=True)
-        
+        self.subset_path.mkdir(parents=True, exist_ok=True)
+
         con = db.connect()
         logger.info("Established connection to DB")
 
@@ -137,54 +142,22 @@ class Subsetter:
 
         con.sql(f"""
             CREATE OR REPLACE TEMP TABLE _subset AS
-            SELECT * EXCLUDE abstract_inverted_index
-            FROM read_parquet('{self.COMPACT_PATH}/works/**/*.parquet')
-            WHERE {self.FILTER_CONDITION}
+            SELECT *
+            FROM read_parquet('{self.full_corpus_path}/works/**/*.parquet')
+            WHERE {self.filter_condition}
         """)
 
         n_rows = con.sql("SELECT count(*) FROM _subset").fetchone()[0]
-        n_chunks = math.ceil(n_rows / self.ROWS_PER_CHUNK)
-        logger.info(f"Filtered subset: {n_rows} rows -> {n_chunks} chunks of ~{self.ROWS_PER_CHUNK} rows each")
+        n_chunks = math.ceil(n_rows / self.rows_per_chunk)
+        logger.info(f"Filtered subset: {n_rows} rows -> {n_chunks} chunks of ~{self.rows_per_chunk} rows each")
 
         for i in range(n_chunks):
             con.sql(f"""
                 COPY (SELECT * FROM _subset WHERE hash(id) % {n_chunks} = {i})
-                TO '{str(self.DB_PATH)}/part_{i:04d}.parquet'
+                TO '{str(self.subset_path)}/part_{i:04d}.parquet'
                 (FORMAT PARQUET, COMPRESSION zstd)
             """)
 
         con.sql("DROP TABLE _subset")
 
         logger.info("Subset saved")
-
-COMPACT_PATH = Path(PROJECT_ROOT/'data'/'compact')
-DB_PATH = Path('/data')
-
-def main():
-    # logger.info("Connecting to DB.")
-    # con = db.connect(DB_PATH)
-    # logger.info("Established connection to DB")
-
-    # logger.info("Started fetching count.")
-    # count = con.sql(f"""
-    #     SELECT field, count(*) AS freq 
-    #     FROM (
-    #         SELECT *, topics[1].field_display_name AS field
-    #         FROM read_parquet('{self.COMPACT_PATH}/works/**/*.parquet')
-    #     )
-    #     GROUP BY field
-    # """).fetchall()
-    # logger.info("Fetched count")
-
-    # print(count)
-    # con.close()
-
-    label = 'math_english'
-    condition = "topics[1].field_display_name = 'Mathematics' AND language = 'en'"
-
-    subsetter = Subsetter(COMPACT_PATH, DB_PATH/label, condition)
-    subsetter.subset_database()
-    subsetter.validate_database()
-
-if __name__ == "__main__":
-    main()
