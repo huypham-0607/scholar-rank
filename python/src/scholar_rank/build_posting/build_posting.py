@@ -6,12 +6,6 @@ from pathlib import Path
 from scholar_rank.utils import get_logger
 from scholar_rank.tokenizer.tokenizer import Tokenizer
 
-
-
-
-
-
-
 class PostingBuildler:
     # File name / Folder name conventions
     LOOKUP_FOLDER = "lookup"
@@ -46,11 +40,4 @@ class PostingBuildler:
             get_token_stream_file_name,
             LOOKUP_FILE_NAME,
         )
-        tokenizer.build_doc_id_lookup()
         tokenizer.get_token()
-
-
-
-
-    
-    

@@ -74,10 +74,15 @@ add_executable(build_doc_len_list apps/build_doc_len_list.cpp)
 target_link_libraries(build_doc_len_list PRIVATE scholar_rank_core)
 add_executable(merge_inverted_blocks apps/merge_inverted_blocks.cpp)
 target_link_libraries(merge_inverted_blocks PRIVATE scholar_rank_core)
+
 # Adding tests
 enable_testing()
 FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.15.2)
 FetchContent_MakeAvailable(googletest)
+
+# Pybind11
+FetchContent_Declare(pybind11 GIT_REPOSITORY https://github.com/pybind/pybind11.git GIT_TAG v2.13.6)
+FetchContent_MakeAvailable(pybind11)
 
 add_executable(vbe_tests tests/utils/vbe_tests.cpp)
 target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
@@ -105,6 +110,9 @@ target_link_libraries(merge_inverted_blocks_tests PRIVATE scholar_rank_core GTes
 
 add_executable(query_engine_tests tests/retrieval/query_engine_tests.cpp)
 target_link_libraries(query_engine_tests PRIVATE scholar_rank_core GTest::gtest_main)
+
+pybind11_add_module(scholar_rank_cpp python/bindings.cpp)
+target_link_libraries(scholar_rank_cpp PRIVATE scholar_rank_core)
 
 include(GoogleTest)
 gtest_discover_tests(vbe_tests)
