@@ -101,8 +101,9 @@ reusing rather than re-solving, since it's the identical underlying question.
 
 Retrieve 500-2000 potential candidates using
 - Lexical retrieval — a custom Block-Max WAND engine, not DuckDB's FTS extension (tried first, abandoned for
-  being too slow at full corpus scale). Index construction is built and tested; query-time traversal is the
-  current implementation focus. See `docs/retrieval_engine.md`.
+  being too slow at full corpus scale). Index construction and query-time traversal are both built and tested
+  (134 C++ tests). Not yet callable from outside C++ — hooking it up to Python is the current next step. See
+  `docs/retrieval_engine.md`.
     - BM25 over title/topic/keywords
     - Title/topic/keyword matches > Abstract matches
     - Compute exact entity matches
@@ -178,27 +179,42 @@ cpp/
 │   ├── utils/
 │   │   ├── logger.h                    ✅
 │   │   ├── vbe.h                       ✅ variable-byte encoding
-│   │   └── file_io.h                   ✅ SafeFile (RAII FILE* wrapper), glob_files
+│   │   └── file_io.h                   ✅ SafeFile + SafeFileMmap (RAII file/mmap wrappers), glob_files
 │   ├── retrieval/
 │   │   ├── posting_list.h              ✅ PostingItem, PostingList
 │   │   ├── bm25.h                      ✅ calc_BM25, bm25_saturation
 │   │   ├── token_stream.h              ✅ read_token (tokenizer wire format)
 │   │   ├── construct_inverted_blocks.h ✅ SPIMI partial-block construction
 │   │   ├── construct_doc_len_list.h    ✅ document-length table construction
-│   │   ├── merge_inverted_blocks.h     ✅ BlockMeta/TermMeta, k-way merge, BMW block metadata
-│   │   └── query_engine.h              ⏳ stub function signatures only
+│   │   ├── merge_inverted_blocks.h     ✅ BlockMeta/TermMeta, k-way merge, BMW block metadata + metadata file
+│   │   └── query_engine.h              ✅ PostingPointer, WAND/BMW query loop
 │   └── graph/                          # CSR/CSC structures, PageRank, PPR headers — not started
 ├── src/
 │   ├── utils/                          ✅ mirrors headers above
-│   ├── retrieval/                      ✅ mirrors headers above; query_engine.cpp ⏳ stub, not wired into the build
+│   ├── retrieval/                      ✅ mirrors headers above, including query_engine.cpp
 │   └── graph/                          # not started
 ├── apps/
 │   ├── build_inverted_blocks.cpp       ✅ CLI: tokenized input -> partial SPIMI blocks
 │   ├── build_doc_len_list.cpp          ✅ CLI: tokenized input -> doc_len_list.bin
-│   └── (merge + query CLI entry points not added yet)
+│   ├── merge_inverted_blocks.cpp       ✅ CLI: partial blocks -> posting files + metadata
+│   └── (no CLI entry point for running a query yet)
 ├── tests/
 │   ├── utils/                          ✅ vbe_tests, file_io_tests
-│   ├── retrieval/                      ✅ one GoogleTest binary per source file above — 72 tests total
+│   ├── retrieval/                      ✅ one GoogleTest binary per source file above — 134 tests total
 │   └── graph/
 └── benchmarks/                         # ties to the BEIR/SNAP/OGB datasets already compiled — not started
+```
+
+The Python side is being refactored alongside this (see `README.md` for the current roadmap):
+
+```
+python/src/scholar_rank/
+├── cli.py                              ⏳ single scholar-rank command; ingest + gen-works-subset done,
+│                                            build-posting + query commands not added yet
+├── utils.py                            ✅ shared logging/path helpers
+├── ingest/fetch_data.py                ✅ EntityIngestor (base class) + WorksIngestor (the Works entity)
+├── works_subset/works_subset.py        ✅ WorksSubsetter — filters the full corpus into a smaller test set
+└── tokenizer/tokenizer.py              ✅ tokenization + doc_id remapping (works, but not CLI-driven yet)
+
+project-config.toml                     ✅ paths + subset filter profiles, at the repo root
 ```

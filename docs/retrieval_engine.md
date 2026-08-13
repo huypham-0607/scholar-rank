@@ -126,14 +126,40 @@ Shared pieces both later stages depend on: `posting_list.cpp` (`PostingItem`/`Po
   files. It's small relative to the posting data it describes (roughly `block_size`:1 smaller), so it's meant
   to be fully loaded/`mmap()`-ed and kept resident for the query engine's whole lifetime, while posting data
   stays properly out-of-core.
-- 72 GoogleTest cases across the files above (`ctest --test-dir build`, or `./build/<name>_tests` per file).
+- 89 GoogleTest cases across the files above (`ctest --test-dir build`, or `./build/<name>_tests` per file).
 
-**Not started**: query-time traversal (`query_engine.h`/`.cpp`) — stub function names only (`find_pivot`,
-`move_posting`, `move_posting_shallow`, `full_evaluate`, `get_new_candidate`), sketching the planned WAND/BMW
-pivot-and-skip operations, not wired into the build yet. Current thinking, not yet a commitment: query-string
-tokenization stays in Python (reusing `tokenizer.py` exactly, since query terms must normalize identically to
-indexed terms), with the C++ engine exposed via bindings and kept resident across many queries rather than
-invoked fresh per query.
+See §2.2.3 below for query-time traversal, the part that actually answers a query using this index.
+
+#### 2.2.3) Query-time traversal — implemented
+
+This is the part that turns a list of search terms into a ranked list of documents, without scoring every
+document that contains any of the terms.
+
+**How it works, briefly**: each search term gets its own cursor (`PostingPointer`) into that term's posting
+list, starting at the term's first document. On every round, the engine sorts the cursors by the document ID
+each one currently points at, and figures out how far it would need to read before a document could possibly
+beat the current top-k score threshold — this is the "pivot" document. Two shortcuts keep this cheap:
+
+- **Term-level shortcut**: if even the best possible score across every remaining term can't beat the current
+  threshold, skip past all of them at once — no document gets scored.
+- **Block-level shortcut**: once a cursor is moved forward to a block, if that block's own maximum possible
+  score can't help, skip the whole block without decoding a single posting inside it.
+
+Only documents that survive both shortcuts ever get a real BM25 score computed. This is the dynamic-pruning
+behavior Block-Max WAND is named for (see the papers in §3 below) — for a typical query it scores a small
+fraction of the documents that actually contain the search terms, instead of all of them.
+
+**Status**: implemented and tested — `cpp/src/retrieval/query_engine.cpp`, 45 dedicated tests on top of the 89
+from the rest of the C++ retrieval pipeline (134 total, `ctest --test-dir build`). Two real bugs were caught by
+these tests, not by manual review: one function computed the correct "skip to here next" position and then
+returned a placeholder value by mistake instead of using it; a second function read metadata from the wrong
+path and silently returned zero results for every query, regardless of what was actually indexed. Both are
+fixed, and both now have a regression test guarding them.
+
+**Not yet done**: there is no way to run a query from outside C++ yet. The plan is for Python to turn a query
+string into search terms — reusing the same tokenizer used to build the index, so terms match exactly — and
+call into the C++ engine to get results back, plus a real CLI command for it. That hookup is the current next
+step; see the project root `README.md` for the up-to-date roadmap.
 
 ## 3. Readings
 

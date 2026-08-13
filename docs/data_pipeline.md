@@ -43,7 +43,11 @@ format that's both smaller on disk and fast to query with this project's tooling
   and accounted for, not something to "fix."
 - Only the "Works" (papers) dataset has been processed so far. OpenAlex also tracks authors, journals, and
   topics as their own datasets — those aren't ingested yet, since the current project phase doesn't need them
-  as standalone data.
+  as standalone data. The pipeline code is now structured so a new dataset can be added as its own module,
+  without changing the shared fetch/validate/delete logic — but nothing beyond Works has been built yet.
+- **Abstracts are not kept in the compact data**, even for the roughly half of papers that have one. BM25
+  search (see `docs/retrieval_engine.md`) only uses titles, topics, and keywords, so keeping abstracts around
+  would use extra disk space for a field nothing currently reads.
 
 ## Potential update: PostgreSQL for fast lookups
 
