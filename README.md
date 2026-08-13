@@ -2,6 +2,8 @@
 
 ScholarRank is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
 
+The goal is to utilize Block-Max WAND with BM25 scoring, Global PageRank, and PPR to query for top-k relevant documents with sub-second latency across 500M+ research works from OpenAlex database.
+
 # Project Status (as of 2026-08-13)
 
 **Data pipeline: done.** Full OpenAlex Works corpus (510M+ works, 241GB compact) fetched, extracted, and
