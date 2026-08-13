@@ -3,9 +3,9 @@
 # both full_corpus and works_subset lives inside data_path
 
 upstream-path = "data/parquet"
-tmp-data-path = "./data/raw"                # Storing raw transient shards fetched from OpenAlex 
-data-path = "/data/scholar_rank/data"                # Storing compacted shards after extraction
+data-path = "/data/scholar_rank/data"          # Storing compacted shards after extraction
 posting-path = "/data/scholar_rank/posting"              # Store posting data
+tmp-corpus-folder = "tmp"
 full-corpus-folder = "full_corpus"
 works-subset-folder = "works_subset"
 

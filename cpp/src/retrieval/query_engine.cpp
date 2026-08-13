@@ -7,6 +7,7 @@
 
 #include "scholar_rank/retrieval/query_engine.h"
 #include "scholar_rank/retrieval/bm25.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/utils/file_io.h"
@@ -410,7 +411,7 @@ std::vector<std::pair<float, unsigned long long>> query (
 
     // Load term_meta_mapping
     std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping = read_block_meta_file(
-        in_path / "block_meta.bin"
+        in_path / file_names::BLOCK_META
     );
     std::unordered_map<std::string, TermMeta> term_meta_mapping;
     for (auto [term,metadata] : raw_term_meta_mapping) {
@@ -431,7 +432,7 @@ std::vector<std::pair<float, unsigned long long>> query (
         if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
             file_index_mapping.emplace(
                 file_index,
-                in_path / std::format("posting_{:04}.bin", file_index)
+                in_path / file_names::posting_file_name(file_index)
             );
         }
     }

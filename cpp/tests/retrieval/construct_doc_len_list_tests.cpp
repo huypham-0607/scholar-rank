@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
 
@@ -127,7 +128,7 @@ namespace ConstructDocLenListTest {
         // reversing the delta encoding write_doc_len_entry applied.
         std::vector<std::pair<unsigned long long, unsigned int>> read_doc_len_table() {
             std::vector<std::pair<unsigned long long, unsigned int>> out;
-            SafeFile fp(out_dir / "doc_len_list.bin", "rb");
+            SafeFile fp(out_dir / file_names::DOC_LEN_LIST, "rb");
 
             unsigned long long doc_id = 0;
             unsigned char buffer[8];

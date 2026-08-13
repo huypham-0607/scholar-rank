@@ -19,6 +19,7 @@
  */
 
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/posting_list.h"
 #include "scholar_rank/retrieval/bm25.h"
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
@@ -429,7 +430,7 @@ void write_metadata(
     // parses. Same length-prefixed-string convention as write_block_meta_file
     // uses for terms.
     fs::path bin_path = out_path;
-    bin_path.replace_extension(".bin");
+    bin_path.replace_extension(file_names::METADATA_BIN_EXTENSION);
     SafeFile bin_file(bin_path, "wb");
 
     std::string posting_dir_str = posting_dir.string();
@@ -501,7 +502,7 @@ void merge_inverted_blocks(
     float avgdl = (float)total_doc_length/doc_len_list.size();
     unsigned long long N = doc_len_list.size();
 
-    std::vector<fs::path> in_paths = glob_files(in_dir, "", ".bin");
+    std::vector<fs::path> in_paths = glob_files(in_dir, "", file_names::PARTIAL_BLOCK_EXT);
     sort(in_paths.begin(), in_paths.end());
 
 
@@ -524,7 +525,7 @@ void merge_inverted_blocks(
     unsigned int file_index = 0;
 
     SafeFile out_file(
-        (out_dir / std::format("posting_{:04}.bin", file_index)),
+        (out_dir / file_names::posting_file_name(file_index)),
         "wb"
     );
 
@@ -565,7 +566,7 @@ void merge_inverted_blocks(
             ++file_index;
             cur_disk_usage = 0;
             out_file = SafeFile(
-                (out_dir / std::format("posting_{:04}.bin", file_index)),
+                (out_dir / file_names::posting_file_name(file_index)),
                 "wb"
             );
         }
@@ -573,10 +574,10 @@ void merge_inverted_blocks(
         cur_disk_usage += disk_required;
     }
 
-    write_block_meta_file(out_dir / "block_meta.bin", term_meta_mapping);
+    write_block_meta_file(out_dir / file_names::BLOCK_META, term_meta_mapping);
 
     write_metadata(
-        out_dir / "metadata.txt",
+        out_dir / file_names::METADATA_TXT,
         out_dir,
         doc_len_dir,
         k1,

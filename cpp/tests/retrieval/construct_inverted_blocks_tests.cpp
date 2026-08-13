@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/construct_inverted_blocks.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/posting_list.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
@@ -574,7 +575,7 @@ namespace ConstructInvertedBlocksTest {
 
         ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
 
-        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        std::vector<fs::path> blocks = glob_files(out_dir, "", file_names::PARTIAL_BLOCK_EXT);
         ASSERT_EQ(blocks.size(), 1);
 
         auto result = read_block(blocks[0]);
@@ -589,7 +590,7 @@ namespace ConstructInvertedBlocksTest {
 
         ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
 
-        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        std::vector<fs::path> blocks = glob_files(out_dir, "", file_names::PARTIAL_BLOCK_EXT);
         ASSERT_EQ(blocks.size(), 2);
 
         auto first = read_block(blocks[0]);
@@ -609,14 +610,14 @@ namespace ConstructInvertedBlocksTest {
 
         ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)1000));
 
-        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        std::vector<fs::path> blocks = glob_files(out_dir, "", file_names::PARTIAL_BLOCK_EXT);
         ASSERT_GT(blocks.size(), 1);
     }
 
     TEST_F(ConstructInvertedBlocksTest, EmptyInputDirProducesNoBlocks) {
         ASSERT_NO_THROW(construct_inverted_blocks(in_dir, out_dir, (size_t)2*(1LL<<20)));
 
-        std::vector<fs::path> blocks = glob_files(out_dir, "", ".bin");
+        std::vector<fs::path> blocks = glob_files(out_dir, "", file_names::PARTIAL_BLOCK_EXT);
         ASSERT_EQ(blocks.size(), 0);
     }
 }

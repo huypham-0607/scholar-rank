@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/token_stream.h"
 #include "scholar_rank/utils/vbe.h"
 
@@ -31,10 +32,10 @@ void construct_doc_len_list(
     const fs::path& in_dir,
     const fs::path& out_dir
 ) {
-    std::vector<fs::path> token_streams = glob_files(in_dir, "", ".bin");
+    std::vector<fs::path> token_streams = glob_files(in_dir, "", file_names::PARTIAL_BLOCK_EXT);
     sort(token_streams.begin(), token_streams.end());
 
-    fs::path out_file_path = out_dir / "doc_len_list.bin";
+    fs::path out_file_path = out_dir / file_names::DOC_LEN_LIST;
 
     SafeFile out_fp(out_file_path, "wb");
 

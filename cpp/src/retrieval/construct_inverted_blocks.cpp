@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/construct_inverted_blocks.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/posting_list.h"
 #include "scholar_rank/retrieval/token_stream.h"
 #include "scholar_rank/utils/file_io.h"
@@ -6,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <format>
 #include <unordered_map>
 #include <vector>
 
@@ -100,7 +100,7 @@ void construct_inverted_blocks(
     std::unordered_map<std::string, PostingList> posting_list_mapping;
     std::vector<std::string> dictionary;
 
-    std::vector<fs::path> token_streams = glob_files(in_dir, "", ".bin");
+    std::vector<fs::path> token_streams = glob_files(in_dir, "", file_names::PARTIAL_BLOCK_EXT);
     sort(token_streams.begin(), token_streams.end());
 
     int partial_block_counter = 0;
@@ -115,7 +115,7 @@ void construct_inverted_blocks(
             dictionary
         )) {
             write_partial_index(
-                out_dir / std::format("block_{:04}.bin", partial_block_counter),
+                out_dir / file_names::partial_block_file_name(partial_block_counter),
                 posting_list_mapping,
                 dictionary
             );

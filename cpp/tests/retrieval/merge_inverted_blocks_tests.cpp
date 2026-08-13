@@ -1,10 +1,10 @@
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
 
 #include <cstdio>
 #include <filesystem>
-#include <format>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
@@ -109,7 +109,7 @@ namespace MergeInvertedBlocksTest {
         // Writes doc_len_list.bin directly from (doc_id, len) pairs, given
         // in increasing doc_id order.
         void write_doc_len_list(const std::vector<std::pair<unsigned long long, unsigned int>>& entries) {
-            SafeFile out(doclen_dir / "doc_len_list.bin", "wb");
+            SafeFile out(doclen_dir / file_names::DOC_LEN_LIST, "wb");
             unsigned long long last = 0;
             unsigned char buf[BUFFER_LIMIT];
             for (auto [doc_id, len] : entries) {
@@ -121,7 +121,7 @@ namespace MergeInvertedBlocksTest {
         }
 
         fs::path doc_len_path() const {
-            return doclen_dir / "doc_len_list.bin";
+            return doclen_dir / file_names::DOC_LEN_LIST;
         }
 
         // Reads count postings starting at (file_index, start_addr).
@@ -129,7 +129,7 @@ namespace MergeInvertedBlocksTest {
             unsigned int file_index, size_t start_addr, int count
         ) {
             std::vector<std::pair<unsigned long long, unsigned int>> out;
-            SafeFile fp(merge_dir / std::format("posting_{:04}.bin", file_index), "rb");
+            SafeFile fp(merge_dir / file_names::posting_file_name(file_index), "rb");
             fseek(fp.get(), (long)start_addr, SEEK_SET);
 
             unsigned long long doc_id = 0;
@@ -149,7 +149,7 @@ namespace MergeInvertedBlocksTest {
         // checking TermMeta.end_addr's strict-endpoint property directly,
         // rather than hand-computing expected byte offsets.
         size_t read_postings_end_addr(unsigned int file_index, size_t start_addr, int count) {
-            SafeFile fp(merge_dir / std::format("posting_{:04}.bin", file_index), "rb");
+            SafeFile fp(merge_dir / file_names::posting_file_name(file_index), "rb");
             fseek(fp.get(), (long)start_addr, SEEK_SET);
 
             for (int k = 0; k < count; k++) {
@@ -165,7 +165,7 @@ namespace MergeInvertedBlocksTest {
             float k1 = 1.2f, float b = 0.75f, int block_size = 2, size_t split_size = (1ull << 30)
         ) {
             merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, k1, b, block_size, split_size);
-            auto all = read_block_meta_file(merge_dir / "block_meta.bin");
+            auto all = read_block_meta_file(merge_dir / file_names::BLOCK_META);
             std::unordered_map<std::string, TermMeta> out;
             for (auto& [term, tm] : all) out[term] = tm;
             return out;
@@ -179,19 +179,19 @@ namespace MergeInvertedBlocksTest {
         // [3,2,4,1,2,3,1,2] for docs 0..7 -> N=8, avgdl=2.25.
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2},{5,3},{6,1},{7,2}});
 
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"alpha", {{0,1}}},
             {"beta", {{0,1}}},
             {"delta", {{2,2}}},
             {"epsilon", {{2,1}}},
             {"gamma", {{0,1}}},
         });
-        write_raw_block_multi("block_0001.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(1), {
             {"alpha", {{1,1},{2,1},{3,1},{5,1}}},
             {"beta", {{1,1},{4,1},{5,1}}},
             {"gamma", {{4,1},{5,1},{7,1}}},
         });
-        write_raw_block_multi("block_0002.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(2), {
             {"alpha", {{7,1}}},
             {"zeta", {{6,1}}},
         });
@@ -256,7 +256,7 @@ namespace MergeInvertedBlocksTest {
         // stream, none of which share a doc_id, so if the bug were back
         // only "aaa" would show up.
         write_doc_len_list({{1,1},{2,1},{3,1}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"aaa", {{1,1}}},
             {"bbb", {{2,1}}},
             {"ccc", {{3,1}}},
@@ -278,8 +278,8 @@ namespace MergeInvertedBlocksTest {
         // already full (block_size=2 here: doc5 then doc10's first copy
         // exactly fill the buffer before doc10's second copy arrives).
         write_doc_len_list({{5,2},{10,3}});
-        write_raw_block("block_0000.bin", "omega", {{5,1},{10,3}});
-        write_raw_block("block_0001.bin", "omega", {{10,2}});
+        write_raw_block(file_names::partial_block_file_name(0), "omega", {{5,1},{10,3}});
+        write_raw_block(file_names::partial_block_file_name(1), "omega", {{10,2}});
 
         auto tm = run_merge(1.2f, 0.75f, /*block_size=*/2);
 
@@ -304,7 +304,7 @@ namespace MergeInvertedBlocksTest {
 
     TEST_F(MergeInvertedBlocksTest, EndAddrMarksExclusiveEndOfTermsByteRange) {
         write_doc_len_list({{0,1},{1,1},{2,1}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"aaa", {{0,1}}},
             {"bbb", {{1,1},{2,1}}},
         });
@@ -351,7 +351,7 @@ namespace MergeInvertedBlocksTest {
 
     TEST_F(MergeInvertedBlocksTest, SplitSizeRoutesTermsAcrossMultiplePostingFiles) {
         write_doc_len_list({{0,1},{1,1},{2,1}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"aaa", {{0,1}}},
             {"bbb", {{1,1}}},
             {"ccc", {{2,1}}},
@@ -394,7 +394,7 @@ namespace MergeInvertedBlocksTest {
 
     TEST_F(MergeInvertedBlocksTest, MergeInvertedBlocksWritesMetadataFile) {
         write_doc_len_list({{0,1},{1,1}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"aaa", {{0,1}}},
             {"bbb", {{1,1}}},
         });
@@ -403,14 +403,14 @@ namespace MergeInvertedBlocksTest {
 
         // write_metadata writes both a human-readable .txt and the
         // authoritative .bin twin read_metadata actually parses.
-        ASSERT_TRUE(fs::exists(merge_dir / "metadata.txt"));
-        ASSERT_TRUE(fs::exists(merge_dir / "metadata.bin"));
+        ASSERT_TRUE(fs::exists(merge_dir / file_names::METADATA_TXT));
+        ASSERT_TRUE(fs::exists(merge_dir / file_names::METADATA_BIN));
 
         fs::path posting_dir, doc_len_dir;
         float k1, b;
         int block_size;
         size_t split_size;
-        ASSERT_NO_THROW(read_metadata(merge_dir / "metadata.bin", posting_dir, doc_len_dir, k1, b, block_size, split_size));
+        ASSERT_NO_THROW(read_metadata(merge_dir / file_names::METADATA_BIN, posting_dir, doc_len_dir, k1, b, block_size, split_size));
 
         EXPECT_EQ(posting_dir, merge_dir);
         EXPECT_EQ(doc_len_dir, doc_len_path());
@@ -437,8 +437,8 @@ namespace MetadataTest {
     };
 
     TEST_F(MetadataTest, WriteThenReadRoundTrips) {
-        fs::path txt_path = tmp_path / "metadata.txt";
-        fs::path bin_path = tmp_path / "metadata.bin";
+        fs::path txt_path = tmp_path / file_names::METADATA_TXT;
+        fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         fs::path posting_dir = tmp_path / "posting";
         fs::path doc_len_dir = tmp_path / "doclen";
 
@@ -467,8 +467,8 @@ namespace MetadataTest {
         // that would NOT survive "%f" round-tripping (1.69161642f is one of
         // the mismatching values found while investigating the text
         // format's precision loss) - proves the binary path is unaffected.
-        fs::path txt_path = tmp_path / "metadata.txt";
-        fs::path bin_path = tmp_path / "metadata.bin";
+        fs::path txt_path = tmp_path / file_names::METADATA_TXT;
+        fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         fs::path posting_dir = tmp_path / "custom_posting_dir";
         fs::path doc_len_dir = tmp_path / "custom_doclen_dir";
         float k1 = 1.69161642f;
@@ -491,7 +491,7 @@ namespace MetadataTest {
     }
 
     TEST_F(MetadataTest, WriteMetadataAlsoWritesHumanReadableTextFile) {
-        fs::path txt_path = tmp_path / "metadata.txt";
+        fs::path txt_path = tmp_path / file_names::METADATA_TXT;
 
         write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
         ASSERT_TRUE(fs::exists(txt_path));
@@ -524,8 +524,8 @@ namespace MetadataTest {
     }
 
     TEST_F(MetadataTest, ReadThrowsOnFileTruncatedBeforeTrailingField) {
-        fs::path txt_path = tmp_path / "metadata.txt";
-        fs::path bin_path = tmp_path / "metadata.bin";
+        fs::path txt_path = tmp_path / file_names::METADATA_TXT;
+        fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
 
         // Every field up through block_size is intact; split_size (an
@@ -546,8 +546,8 @@ namespace MetadataTest {
     }
 
     TEST_F(MetadataTest, ReadThrowsOnFileTruncatedMidString) {
-        fs::path txt_path = tmp_path / "metadata.txt";
-        fs::path bin_path = tmp_path / "metadata.bin";
+        fs::path txt_path = tmp_path / file_names::METADATA_TXT;
+        fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
 
         // 1 byte is shorter than even posting_dir's 2-byte length prefix.

@@ -1,4 +1,5 @@
 #include "scholar_rank/retrieval/query_engine.h"
+#include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
 #include "scholar_rank/retrieval/bm25.h"
 #include "scholar_rank/utils/file_io.h"
@@ -106,7 +107,7 @@ namespace PostingPointerTest {
         //   block1: (5)+f2, (1)+f1                = 1+4 + 1+4 = 10 bytes -> starts at 10, ends at 20
         //   block2: (10)+f3                       = 1+4 = 5 bytes        -> starts at 20, ends at 25
         void setupAlpha() {
-            fs::path path = tmp_path / "posting_0000.bin";
+            fs::path path = tmp_path / file_names::posting_file_name(0);
             auto blocks = write_posting_file(
                 path,
                 {
@@ -124,7 +125,7 @@ namespace PostingPointerTest {
         //   block0: [(1,f=1),(2,f=1)]  block_ub=0.3
         // doc_count=2, term_ub=0.3. Bytes: (1)+f1,(1)+f1 = 5+5=10 -> end_addr=10.
         void setupBeta() {
-            fs::path path = tmp_path / "posting_0001.bin";
+            fs::path path = tmp_path / file_names::posting_file_name(1);
             auto blocks = write_posting_file(
                 path,
                 { {{1,1},{2,1}} },
@@ -168,7 +169,7 @@ namespace PostingPointerTest {
         // "alpha" points at file_index=0, but never registering that entry
         // in file_index_mapping should surface as a clear construction
         // error, not a default-constructed/garbage SafeFileMmap.
-        fs::path path = tmp_path / "posting_0000.bin";
+        fs::path path = tmp_path / file_names::posting_file_name(0);
         auto blocks = write_posting_file(path, {{{0,1}}}, {0.1f});
         term_meta_mapping["alpha"] = make_term_meta(blocks, 1, 0, 5, 0.1f);
         // file_index_mapping intentionally left empty.
@@ -370,7 +371,7 @@ namespace PostingPointerTest {
     TEST_F(PostingPointerTest, ReadPostingEntryThrowsOnUnterminatedVbe) {
         // 9 bytes, all < 128 (continuation bit never set) - read_posting_entry's
         // own VBE scan never finds a terminator within BUFFER_LIMIT(8) bytes.
-        fs::path path = tmp_path / "posting_0000.bin";
+        fs::path path = tmp_path / file_names::posting_file_name(0);
         {
             SafeFile out(path, "wb");
             unsigned char junk[9] = {1,1,1,1,1,1,1,1,1};
@@ -463,17 +464,17 @@ namespace QueryHelpersTest {
         const float b = 0.75f;
 
         void setupCorpus() {
-            fs::path p1 = tmp_path / "posting_0000.bin";
+            fs::path p1 = tmp_path / file_names::posting_file_name(0);
             auto b1 = write_posting_file(p1, { {{0,1},{2,2}}, {{4,1}} }, {0.7f, 1.0f});
             term_meta_mapping["t1"] = make_term_meta(b1, 3, 0, /*end_addr=*/15, 1.0f);
             file_index_mapping.emplace(0u, p1);
 
-            fs::path p2 = tmp_path / "posting_0001.bin";
+            fs::path p2 = tmp_path / file_names::posting_file_name(1);
             auto b2 = write_posting_file(p2, { {{0,1},{3,1}} }, {0.8f});
             term_meta_mapping["t2"] = make_term_meta(b2, 2, 1, /*end_addr=*/10, 0.8f);
             file_index_mapping.emplace(1u, p2);
 
-            fs::path p3 = tmp_path / "posting_0002.bin";
+            fs::path p3 = tmp_path / file_names::posting_file_name(2);
             auto b3 = write_posting_file(p3, { {{2,1}} }, {0.6f});
             term_meta_mapping["t3"] = make_term_meta(b3, 1, 2, /*end_addr=*/5, 0.6f);
             file_index_mapping.emplace(2u, p3);
@@ -673,7 +674,7 @@ namespace QueryEndToEndTest {
         fs::path tmp_path, block_dir, doclen_dir, merge_dir;
 
         void write_doc_len_list(const std::vector<std::pair<unsigned long long, unsigned int>>& entries) {
-            SafeFile out(doclen_dir / "doc_len_list.bin", "wb");
+            SafeFile out(doclen_dir / file_names::DOC_LEN_LIST, "wb");
             unsigned long long last = 0;
             unsigned char buf[BUFFER_LIMIT];
             for (auto [doc_id, len] : entries) {
@@ -711,19 +712,19 @@ namespace QueryEndToEndTest {
         }
 
         fs::path doc_len_path() const {
-            return doclen_dir / "doc_len_list.bin";
+            return doclen_dir / file_names::DOC_LEN_LIST;
         }
 
         fs::path build_index(float k1 = 1.2f, float b = 0.75f, int block_size = 128, size_t split_size = (1ull << 30)) {
             merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, k1, b, block_size, split_size);
-            return merge_dir / "metadata.bin";
+            return merge_dir / file_names::METADATA_BIN;
         }
     };
 
     TEST_F(QueryEndToEndTest, ReturnsTopKRankedAgainstIndependentBM25Reference) {
         // doc_len_list: {0:3,1:2,2:4,3:1,4:2} -> N=5, avgdl=2.4.
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat",  {{0,1},{2,2},{4,1}}},
             {"dog",  {{1,1},{2,1}}},
             {"bird", {{3,1}}},
@@ -762,7 +763,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, ResultsAreNonIncreasingInScore) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat",  {{0,1},{2,2},{4,1}}},
             {"dog",  {{1,1},{2,1}}},
             {"bird", {{3,1}}},
@@ -780,7 +781,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, ReturnsExactlyOneResultWhenOnlyOneDocumentMatches) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"bird", {{3,1}}},
         });
         fs::path meta_path = build_index();
@@ -792,7 +793,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, DoesNotPadResultsWithSentinelsWhenKExceedsMatchCount) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"bird", {{3,1}}},
         });
         fs::path meta_path = build_index();
@@ -804,7 +805,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, ReturnsExactlyKWhenMoreCandidatesExistThanK) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat", {{0,1},{2,2},{4,1}}},
         });
         fs::path meta_path = build_index();
@@ -815,7 +816,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, ReturnsEmptyWhenNoQueryTermIsIndexed) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat", {{0,1}}},
         });
         fs::path meta_path = build_index();
@@ -826,7 +827,7 @@ namespace QueryEndToEndTest {
 
     TEST_F(QueryEndToEndTest, ReturnsEmptyForEmptyQuery) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat", {{0,1}}},
         });
         fs::path meta_path = build_index();
@@ -845,7 +846,7 @@ namespace QueryEndToEndTest {
         // this path (check_block_max failing -> get_new_candidate ->
         // advance_one_including) is exercised repeatedly.
         write_doc_len_list({{0,2},{1,2},{2,2},{3,2},{4,2},{5,2}});
-        write_raw_block_multi("block_0000.bin", {
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"x", {{0,1},{2,1},{4,1}}},
             {"y", {{1,1},{3,1},{5,1}}},
         });

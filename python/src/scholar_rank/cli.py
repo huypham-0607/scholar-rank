@@ -14,6 +14,7 @@ from pathlib import Path
 from scholar_rank.ingest.fetch_data import EntityIngestor
 from scholar_rank.works_subset.works_subset import WorksSubsetter
 from scholar_rank.utils import PROJECT_ROOT, get_logger
+from scholar_rank.posting_builder.posting_buildler import PostingBuilder
 
 logger = get_logger(__name__)
 CONFIG_PATH = PROJECT_ROOT / "project-config.toml"
@@ -26,24 +27,41 @@ def resolve_path(raw: str) -> Path:
     p = Path(raw)
     return p if p.is_absolute() else (PROJECT_ROOT / p).resolve()
 
+def get_subset_folder(profile: str) -> str:
+    return profile.replace("-", "_")
+
+def get_profile_path(profile: str, config: dict) -> Path:
+    paths = config["data-path"]
+    return (
+        resolve_path(paths["data-path"]) / paths["full-corpus-folder"] if (profile == "full-corpus")
+        else resolve_path(paths["data-path"]) / paths["works-subset-folder"] / get_subset_folder(args.profile)
+    )
+
 def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
     ingestor_cls = EntityIngestor.registry[args.entity]
     ingestor = ingestor_cls(
         upstream_prefix=Path(paths["upstream-path"]),
-        raw_path=resolve_path(paths["tmp-data-path"]),
+        raw_path=resolve_path(paths["data-path"]) / paths["tmp-corpus-folder"],
         compact_path=resolve_path(paths["data-path"]) / paths["full-corpus-folder"],
     )
     ingestor.orchestrate(forced_fetch=args.forced_fetch)
 
 def cmd_gen_works_subset(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
-    full_corpus_path = resolve_path(paths["data-path"]) / paths["full-corpus-folder"]
-    subset_path = resolve_path(paths["data-path"]) / paths["works-subset-folder"] / args.profile.replace("-", "_")
+    full_corpus_path = get_profile_path("full-corpus")
+    subset_path = get_profile_path(args.profile)
     condition = config["works-subset"]["subset-profiles"][args.profile]
     subsetter = WorksSubsetter(full_corpus_path, subset_path, condition)
     subsetter.subset_database()
     subsetter.validate_database()
+
+def cmd_build_posting(args: argparse.Namespace, config: dict) -> None:
+    paths = config["data-path"]
+    corpus_path = get_profile_path(args.profile)
+    out_path = paths["posting-path"]
+    posting_builder = PostingBuilder(corpus_path, out_path)
+    posting_builder.build()
 
 def build_parser(config: dict) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scholar-rank")
@@ -68,9 +86,18 @@ def build_parser(config: dict) -> argparse.ArgumentParser:
         "--profile",
         required=True,
         choices=sorted(config["works-subset"]["subset-profiles"]),
-        help="Subset profile to use (see project-config.toml for filter conditions)"
+        help="Subset profile to use (see project-config.toml for filter conditions)."
     )
     gen_works_subset_parser.set_defaults(func=cmd_gen_works_subset)
+
+    build_posting_parser. = subparsers.add_parser("build-posting", help="Build inverted index posting from data.")
+    build_posting_parser.add_argument(
+        "--profile",
+        required=True,
+        choices=sorted(config["works-subset"]["subset-profiles"].keys().append("full-corpus")),
+        help="Subset profile to use (see project-config.toml for filter conditions), has to be generated first."
+    )
+    build_posting_parser.set_defaults(func=cmd_build_posting) 
 
     return parser
 
