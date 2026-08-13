@@ -11,10 +11,7 @@ import argparse
 import tomllib
 
 from pathlib import Path
-from scholar_rank.ingest.fetch_data import EntityIngestor
-from scholar_rank.works_subset.works_subset import WorksSubsetter
-from scholar_rank.utils import PROJECT_ROOT, get_logger
-from scholar_rank.posting_builder.posting_buildler import PostingBuilder
+from scholar_rank import EntityIngestor, WorksSubsetter, PROJECT_ROOT, get_logger, PostingBuildler
 
 logger = get_logger(__name__)
 CONFIG_PATH = PROJECT_ROOT / "project-config.toml"
@@ -60,7 +57,7 @@ def cmd_build_posting(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
     corpus_path = get_profile_path(args.profile)
     out_path = paths["posting-path"]
-    posting_builder = PostingBuilder(corpus_path, out_path)
+    posting_builder = PostingBuildler(corpus_path, out_path)
     posting_builder.build()
 
 def build_parser(config: dict) -> argparse.ArgumentParser:
@@ -90,11 +87,12 @@ def build_parser(config: dict) -> argparse.ArgumentParser:
     )
     gen_works_subset_parser.set_defaults(func=cmd_gen_works_subset)
 
-    build_posting_parser. = subparsers.add_parser("build-posting", help="Build inverted index posting from data.")
+    build_posting_parser = subparsers.add_parser("build-posting", help="Build inverted index posting from data.")
+    profile_list = sorted([*config["works-subset"]["subset-profiles"].keys(), "full-corpus"])
     build_posting_parser.add_argument(
         "--profile",
         required=True,
-        choices=sorted(config["works-subset"]["subset-profiles"].keys().append("full-corpus")),
+        choices=profile_list,
         help="Subset profile to use (see project-config.toml for filter conditions), has to be generated first."
     )
     build_posting_parser.set_defaults(func=cmd_build_posting) 

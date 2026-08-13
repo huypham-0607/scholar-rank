@@ -11,7 +11,7 @@ import duckdb as db
 
 from pathlib import Path
 from collections.abc import Callable
-from scholar_rank.utils import get_logger
+from scholar_rank import get_logger
 
 logger = get_logger(__name__)
 

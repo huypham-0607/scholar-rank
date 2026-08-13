@@ -11,7 +11,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from scholar_rank.utils import get_logger, get_current_time
+from scholar_rank import get_logger, get_current_time
 from botocore import UNSIGNED
 from botocore.client import Config
 

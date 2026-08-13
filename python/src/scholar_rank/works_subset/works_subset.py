@@ -7,7 +7,7 @@ import duckdb as db
 import math
 
 from pathlib import Path
-from scholar_rank.utils import get_logger, get_current_time
+from scholar_rank import get_logger, get_current_time
 
 logger = get_logger(__name__)
 
