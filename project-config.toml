@@ -13,3 +13,11 @@ works-subset-folder = "works_subset"
 "math-en" = "topics[1].field_display_name = 'Mathematics' AND language = 'en'"
 "engr-en" = "topics[1].field_display_name = 'Engineering' AND language = 'en'"
 "vet-en" = "topics[1].field_display_name = 'Veterinary' AND language = 'en'"
+"full-en" = "language = 'en'"
+
+[posting]
+"lookup-folder" = "lookup"
+"lookup-file-name" = "doc_id_lookup.bin"
+"token-stream-folder" = "token_stream"
+"posting-folder" = "posting"
+"partial-folder" = "posting/partial"

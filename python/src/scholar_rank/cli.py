@@ -27,12 +27,16 @@ def resolve_path(raw: str) -> Path:
 def get_subset_folder(profile: str) -> str:
     return profile.replace("-", "_")
 
-def get_profile_path(profile: str, config: dict) -> Path:
+def get_profile_data_path(profile: str, config: dict) -> Path:
     paths = config["data-path"]
     return (
         resolve_path(paths["data-path"]) / paths["full-corpus-folder"] if (profile == "full-corpus")
         else resolve_path(paths["data-path"]) / paths["works-subset-folder"] / get_subset_folder(args.profile)
     )
+
+def get_profile_posting_path(profile: str, config: dict) -> Path:
+    paths = config["data-path"]
+    return resolve_path(paths["posting-path"]) / get_subset_folder(args.profile)
 
 def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
@@ -46,8 +50,8 @@ def cmd_ingest(args: argparse.Namespace, config: dict) -> None:
 
 def cmd_gen_works_subset(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
-    full_corpus_path = get_profile_path("full-corpus")
-    subset_path = get_profile_path(args.profile)
+    full_corpus_path = get_profile_data_path("full-corpus", config)
+    subset_path = get_profile_data_path(args.profile, config)
     condition = config["works-subset"]["subset-profiles"][args.profile]
     subsetter = WorksSubsetter(full_corpus_path, subset_path, condition)
     subsetter.subset_database()
@@ -55,15 +59,19 @@ def cmd_gen_works_subset(args: argparse.Namespace, config: dict) -> None:
 
 def cmd_build_posting(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
-    corpus_path = get_profile_path(args.profile)
-    out_path = paths["posting-path"]
+    corpus_path = get_profile_data_path(args.profile, config)
+    out_path = get_profile_posting_path(args.profile, config)
     posting_builder = PostingBuildler(corpus_path, out_path)
     posting_builder.build()
+
+def cmd_query(args: argparse.Namespace, config: dict) -> None:
+    pass
 
 def build_parser(config: dict) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scholar-rank")
     subparsers = parser.add_subparsers(dest="command", required = True)
 
+    # ingest
     ingest_parser = subparsers.add_parser("ingest", help="Fetch + extract OpenAlex shards")
     ingest_parser.add_argument(
         "--entity",
@@ -78,6 +86,7 @@ def build_parser(config: dict) -> argparse.ArgumentParser:
     )
     ingest_parser.set_defaults(func=cmd_ingest)
 
+    # gen_works_subset
     gen_works_subset_parser = subparsers.add_parser("gen-works-subset", help="Extract works subset from full corpus.")
     gen_works_subset_parser.add_argument(
         "--profile",
@@ -87,15 +96,36 @@ def build_parser(config: dict) -> argparse.ArgumentParser:
     )
     gen_works_subset_parser.set_defaults(func=cmd_gen_works_subset)
 
+    # build_posting
     build_posting_parser = subparsers.add_parser("build-posting", help="Build inverted index posting from data.")
-    profile_list = sorted([*config["works-subset"]["subset-profiles"].keys(), "full-corpus"])
     build_posting_parser.add_argument(
         "--profile",
         required=True,
-        choices=profile_list,
+        choices=sorted(config["works-subset"]["subset-profiles"]),
         help="Subset profile to use (see project-config.toml for filter conditions), has to be generated first."
     )
-    build_posting_parser.set_defaults(func=cmd_build_posting) 
+    build_posting_parser.set_defaults(func=cmd_build_posting)
+
+    # query
+    query_parser = subparsers.add_parser("query", help="Retrieve top-k documents relevant to a query")
+    query_parser.add_argument(
+        "--query",
+        required=True,
+        help="The query string to evaluate."
+    )
+    query_parser.add_argument(
+        "--k",
+        type=int,
+        default=10,
+        help="Number of documents to retrieve."
+    )
+    query_parser.add_argument(
+        "--profile",
+        default="full-en",
+        choices=sorted(config["works-subset"]["subset-profiles"]),
+        help="Subset profile to query (Defaults to full-en)."
+    )
+    query_parser.set_defaults(func=cmd_query)
 
     return parser
 

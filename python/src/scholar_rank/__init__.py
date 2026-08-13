@@ -4,3 +4,4 @@ from .ingest.fetch_data import EntityIngestor
 from .works_subset.works_subset import WorksSubsetter
 from .tokenizer.tokenizer import Tokenizer
 from .build_posting.build_posting import PostingBuildler
+from .query_wrapper.query_wrapper import query
