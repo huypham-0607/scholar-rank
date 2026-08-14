@@ -86,14 +86,15 @@ def _():
     assert "abstract_inverted_index" not in WorksIngestor.columns, WorksIngestor.columns
 
 
-@check("WorksSubsetter constructs with (full_corpus_path, subset_path, filter_condition)")
+@check("WorksSubsetter constructs with (full_corpus_path, subset_path, spill_path, filter_condition)")
 def _():
     from scholar_rank.works_subset.works_subset import WorksSubsetter
-    s = WorksSubsetter(Path("full_corpus"), Path("subset"), "language = 'en'")
+    s = WorksSubsetter(Path("full_corpus"), Path("subset"), Path("spill"), "language = 'en'")
     assert s.full_corpus_path == Path("full_corpus")
     assert s.subset_path == Path("subset")
+    assert s.spill_path == Path("spill")
     assert s.filter_condition == "language = 'en'"
-    assert s.rows_per_chunk == 450000
+    assert s.rows_per_chunk == 10000000
 
 
 @check("project-config.toml's subset-profiles are all valid DuckDB boolean expressions")

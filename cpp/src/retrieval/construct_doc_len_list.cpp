@@ -2,6 +2,7 @@
 #include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/token_stream.h"
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/logger.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -32,12 +33,15 @@ void construct_doc_len_list(
     const fs::path& in_dir,
     const fs::path& out_dir
 ) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
     std::vector<fs::path> token_streams = glob_files(in_dir, "", file_names::PARTIAL_BLOCK_EXT);
     sort(token_streams.begin(), token_streams.end());
 
     fs::path out_file_path = out_dir / file_names::DOC_LEN_LIST;
 
     SafeFile out_fp(out_file_path, "wb");
+
+    logger.log("Started constructing document length list.");
 
     bool has_started = false;
 
@@ -67,6 +71,7 @@ void construct_doc_len_list(
     if (has_started) {
         write_doc_len_entry(out_fp, delta, running_freq);
     }
+    logger.log("Finished constructing document length list.");
 }
 
 bool read_doc_len_entry(

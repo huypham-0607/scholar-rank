@@ -14,6 +14,10 @@ works-subset-folder = "works_subset"
 "engr-en" = "topics[1].field_display_name = 'Engineering' AND language = 'en'"
 "vet-en" = "topics[1].field_display_name = 'Veterinary' AND language = 'en'"
 "full-en" = "language = 'en'"
+"full-en-2" = "language = 'en'"
+
+[duckdb]
+"spill-path" = "/data/scholar_rank/data/spill"
 
 [posting]
 "lookup-folder" = "lookup"

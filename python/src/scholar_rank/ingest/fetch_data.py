@@ -705,25 +705,30 @@ class WorksIngestor(EntityIngestor):
 
         with open(compact_path/self.entity/"integrity_report.txt", "w", encoding="utf-8") as f:
             f.write(f"Shards: {len(compact_shard_paths)}\n")
-            f.write(f"Total raw size: {total_raw_bytes:,} bytes ({total_raw_bytes/1e9:.2f} GB)")
-            f.write(f"Total size: {total_bytes:,} bytes ({total_bytes/1e9:.2f} GB)\n\n")
-            f.write(f"Size reduction: {float(total_bytes)/total_raw_bytes*100:.2f}% of raw size")
+            f.write(f"Total raw size: {total_raw_bytes:,} bytes ({total_raw_bytes/1e9:.2f} GB)\n")
+            f.write(f"Total size: {total_bytes:,} bytes ({total_bytes/1e9:.2f} GB)\n")
+            f.write(f"Size reduction: {float(total_bytes)/total_raw_bytes*100:.2f}% of raw size\n\n")
 
             f.write(f"Duplicate work ids ({len(duplicate_ids)}):\n")
+            f.write(f"Dangling references ({len(dangling_refs)}):\n")
+            f.write(f"Works with duplicate links ({len(dup_link_works)}):\n")
+            f.write(f"Duplicate work ids list:\n")
             for wid, n in duplicate_ids:
                 f.write(f"  {wid}\t{n}\n")
-
-            f.write(f"\nDangling references ({len(dangling_refs)}):\n")
+            f.write(f"Dangling refs list:\n")
             for work_id, ref_id in dangling_refs:
                 f.write(f"  {work_id} -> {ref_id}\n")
-
-            f.write(f"\nWorks with duplicate links ({len(dup_link_works)}):\n")
+            f.write(f"Works with duplicate links list:\n")
             for wid in dup_link_works:
                 f.write(f"  {wid}\n")
-
             f.write(f"\nDuplicate link detail ({len(dup_link_detail)}):\n")
             for work_id, ref_id, n in dup_link_detail:
                 f.write(f"  {work_id} -> {ref_id} (x{n})\n")
+
+
+
+
+
 
         with open(compact_path/self.entity/"compact_manifest.json", "w") as f:
             json.dump(compact_manifest, f)

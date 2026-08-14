@@ -103,10 +103,11 @@ class Tokenizer:
         lookup_out_path: Path,
         token_stream_file_name: Callable[[int], str],
         lookup_file_name: str,
+        spill_path: Path,
         row_per_chunk: int = (1<<18),
         chunk_per_file: int = (1<<8)
     ):
-        con = db.connect()
+        con = db.connect(config={"temp_directory": str(spill_path)})
 
         logger.info(f"Start serializing corpus from {db_path}.")
 
@@ -140,16 +141,23 @@ class Tokenizer:
             JOIN doc_id_map m ON regexp_replace(id, 'W', '')::BIGINT = m.raw_id
         """)
 
-        token_stream = con.sql(f"""
+        logger.info(f"Creating _token_stream table...")
+
+        con.sql("""
+            CREATE OR REPLACE TEMP TABLE _token_stream AS
             SELECT id, unnest(tokens) AS token FROM tokenized
             ORDER BY id ASC
         """)
 
-        logger.info(con.sql("SELECT count(*) FROM token_stream").fetchone())
+        logger.info(f"Finished creating _token_stream table.")
+
+        token_stream = con.sql("SELECT id, token FROM _token_stream")
 
         buf = io.BytesIO()
 
         file_count = 0
+
+        logger.info(f"Begin serializing token to {str(out_path)}.")
 
         batch = token_stream.fetchmany(row_per_chunk)
         out_path.mkdir(parents=True, exist_ok=True)

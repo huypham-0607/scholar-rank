@@ -23,6 +23,7 @@ class PostingBuildler:
         self,
         corpus_path: Path,
         out_path: Path,
+        spill_path: Path,
         lookup_folder: str,
         lookup_file_name: str,
         token_stream_folder: str,
@@ -31,6 +32,7 @@ class PostingBuildler:
     ) -> None:
         self.corpus_path = corpus_path
         self.out_path = out_path
+        self.spill_path = spill_path
 
         self.lookup_folder = lookup_folder
         self.lookup_file_name = lookup_file_name
@@ -52,6 +54,7 @@ class PostingBuildler:
             self.lookup_path,
             self.get_token_stream_file_name,
             self.lookup_file_name,
+            self.spill_path,
         )
 
         scholar_rank_cpp.build_doc_len(self.token_stream_path, self.posting_path)

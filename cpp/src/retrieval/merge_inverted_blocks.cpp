@@ -25,6 +25,7 @@
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/logger.h"
 
 #include <algorithm>
 #include <cmath>
@@ -488,6 +489,8 @@ void merge_inverted_blocks(
     const int block_size,
     const size_t split_size
 ) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
+
     std::vector<unsigned int> doc_len_list;
 
     read_doc_len_list(doc_len_dir, doc_len_list);
@@ -519,6 +522,8 @@ void merge_inverted_blocks(
             string_heap.push(std::make_pair(streams[i].get_term(),i));
         }
     }
+
+    logger.log("Started merging inverted index blocks.");
 
     std::unordered_map<std::string, TermMeta> term_meta_mapping;
     size_t cur_disk_usage = 0;
@@ -576,6 +581,8 @@ void merge_inverted_blocks(
 
     write_block_meta_file(out_dir / file_names::BLOCK_META, term_meta_mapping);
 
+    logger.log("Finished merging inverted index blocks. Writing metadata...");
+
     write_metadata(
         out_dir / file_names::METADATA_TXT,
         out_dir,
@@ -585,4 +592,6 @@ void merge_inverted_blocks(
         block_size,
         split_size
     );
+
+    logger.log("Finished writing metadata.");
 }

@@ -4,6 +4,7 @@
 #include "scholar_rank/retrieval/token_stream.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/logger.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -97,11 +98,14 @@ void construct_inverted_blocks(
     const fs::path& out_dir,
     const size_t mem_limit
 ) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
     std::unordered_map<std::string, PostingList> posting_list_mapping;
     std::vector<std::string> dictionary;
 
     std::vector<fs::path> token_streams = glob_files(in_dir, "", file_names::PARTIAL_BLOCK_EXT);
     sort(token_streams.begin(), token_streams.end());
+
+    logger.log("Started building inverted index blocks.");
 
     int partial_block_counter = 0;
 
@@ -125,4 +129,6 @@ void construct_inverted_blocks(
             dictionary.clear();
         }
     }
+
+    logger.log("Finished building inverted index blocks.");
 }

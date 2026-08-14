@@ -52,18 +52,21 @@ def cmd_gen_works_subset(args: argparse.Namespace, config: dict) -> None:
     paths = config["data-path"]
     full_corpus_path = get_profile_data_path("full-corpus", config)
     subset_path = get_profile_data_path(args.profile, config)
+    spill_path = resolve_path(config["duckdb"]["spill-path"])
     condition = config["works-subset"]["subset-profiles"][args.profile]
-    subsetter = WorksSubsetter(full_corpus_path, subset_path, condition)
+    subsetter = WorksSubsetter(full_corpus_path, subset_path, spill_path, condition)
     subsetter.subset_database()
     subsetter.validate_database()
 
 def cmd_build_posting(args: argparse.Namespace, config: dict) -> None:
     corpus_path = get_profile_data_path(args.profile, config)
     out_path = get_profile_posting_path(args.profile, config)
+    spill_path = resolve_path(config["duckdb"]["spill-path"])
     posting_config = config["posting"]
     posting_builder = PostingBuildler(
         corpus_path,
         out_path,
+        spill_path,
         posting_config["lookup-folder"],
         posting_config["lookup-file-name"],
         posting_config["token-stream-folder"],
