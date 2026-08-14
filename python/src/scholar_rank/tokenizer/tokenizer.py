@@ -143,11 +143,8 @@ class Tokenizer:
 
         logger.info(f"Creating _token_stream table...")
 
-        con.sql("""
-            CREATE OR REPLACE TEMP TABLE _token_stream AS
-            SELECT id, unnest(tokens) AS token FROM tokenized
-            ORDER BY id ASC
-        """)
+        rel = con.sql(""" SELECT id, tokens FROM tokenized ORDER BY id ASC """)
+        con.sql(""" CREATE OR REPLACE TEMP TABLE _token_stream AS SELECT id, unnest(tokens) AS token FROM rel """)
 
         logger.info(f"Finished creating _token_stream table.")
 
