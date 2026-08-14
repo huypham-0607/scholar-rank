@@ -15,7 +15,7 @@ const unsigned long long MAX_DOC_ID = std::numeric_limits<unsigned long long>::m
 class PostingPointer {
 public:
     PostingPointer(
-        const std::string _term,
+        const std::string& _term,
         const int _block_size,
         std::unordered_map<std::string, TermMeta> &term_meta_mapping,
         std::unordered_map<unsigned int, SafeFileMmap> &file_index_mapping
@@ -24,7 +24,7 @@ public:
     int get_cur_block_size(const int block_id) const;
     unsigned int get_doc_count() const;
     unsigned long long get_doc_id() const;
-    unsigned long long get_block_id() const;
+    unsigned long long get_shallow_block_id() const;
     unsigned long long get_block_count() const;
     unsigned long long get_next_block_doc_id() const;
     float get_term_upper_bound() const;
@@ -32,6 +32,7 @@ public:
     unsigned int get_frequency() const;
 
     void next_shallow(const unsigned long long target_doc_id);
+    void next_shallow_deep(const unsigned long long target_doc_id);
     void next(const unsigned long long target_doc_id);
     
 private:
@@ -40,6 +41,7 @@ private:
     SafeFileMmap* posting_file;
     int block_size;
     int cur_block_id;
+    int deep_block_id;
     size_t cur_addr;
     unsigned long long doc_id;
     int doc_pos;

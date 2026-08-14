@@ -4,7 +4,7 @@
 #include "scholar_rank/utils/file_io.h"
 #include <string>
 
-constexpr unsigned int MAX_TERM_LENGTH = 256; // Might change depending on dataset
+constexpr unsigned int MAX_TERM_LENGTH = (1<<12); // Might change depending on dataset
 
 /**
  * @brief Read a single doc_id - term pair.

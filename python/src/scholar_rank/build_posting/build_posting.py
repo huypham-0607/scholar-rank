@@ -57,6 +57,9 @@ class PostingBuildler:
             self.spill_path,
         )
 
+        self.posting_path.mkdir(parents=True, exist_ok=True)
+        self.partial_path.mkdir(parents=True, exist_ok=True)
+
         scholar_rank_cpp.build_doc_len(self.token_stream_path, self.posting_path)
         scholar_rank_cpp.build_inverted_blocks(
             self.token_stream_path,

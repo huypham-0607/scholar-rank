@@ -157,6 +157,9 @@ class Tokenizer:
 
         file_count = 0
 
+        no_tokens = 0
+        max_token_length = 0
+        
         logger.info(f"Begin serializing token to {str(out_path)}.")
 
         batch = token_stream.fetchmany(row_per_chunk)
@@ -172,6 +175,9 @@ class Tokenizer:
                         # Convert to bytes object
                         encoded = token.encode("utf-8")
 
+                        no_tokens += 1
+                        max_token_length = max(max_token_length, len(encoded))
+
                         # Convert into little endian signed ll, usigned short
                         buf.write(struct.pack('<qH', doc_id, len(encoded)))
                         buf.write(encoded)
@@ -184,6 +190,8 @@ class Tokenizer:
 
             file_count += 1
         logger.info(f"Finished serializing corpus from {db_path}.")
+        logger.info(f"No of tokens: {no_tokens}")
+        logger.info(f"Max token length = {max_token_length}")
 
     def tokenize_query(self, query: str) -> list[str]:
         con = db.connect()
@@ -199,3 +207,15 @@ class Tokenizer:
         """, params={"query": query}).fetchone()
 
         return res[0]
+
+def main():
+    con = db.connect(config={"temp_directory": str(spill_path)})
+    con.execute(
+        f"""
+        SELECT name, value FROM duckdb_settings()
+        WHERE name IN ('threads','worker_threads','preserve_insertion_order','memory_limit');
+        """
+    )
+
+if __name__ == "__main__":
+    main()

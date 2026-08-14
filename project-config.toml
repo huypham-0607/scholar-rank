@@ -13,6 +13,7 @@ works-subset-folder = "works_subset"
 "math-en" = "topics[1].field_display_name = 'Mathematics' AND language = 'en'"
 "engr-en" = "topics[1].field_display_name = 'Engineering' AND language = 'en'"
 "vet-en" = "topics[1].field_display_name = 'Veterinary' AND language = 'en'"
+"cs-en" = "topics[1].field_display_name = 'Computer Science' AND language = 'en'"
 "full-en" = "language = 'en'"
 "full-en-2" = "language = 'en'"
 

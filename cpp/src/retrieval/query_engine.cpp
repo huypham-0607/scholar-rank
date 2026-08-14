@@ -12,6 +12,7 @@
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
+#include "scholar_rank/utils/logger.h"
 
 #include <vector>
 #include <format>
@@ -19,14 +20,14 @@
 #include <unordered_map>
 #include <filesystem>
 #include <bit>
-#include <cmath>
 #include <queue>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
 
 PostingPointer::PostingPointer(
-    const std::string _term,
+    const std::string& _term,
     const int _block_size,
     std::unordered_map<std::string, TermMeta> &term_meta_mapping,
     std::unordered_map<unsigned int, SafeFileMmap> &file_index_mapping
@@ -48,6 +49,7 @@ PostingPointer::PostingPointer(
     block_size = _block_size;
     posting_file = &(file_it->second);
     cur_block_id = 0;
+    deep_block_id = 0;
     cur_addr = term_meta->block_meta_list[0].start_addr;
     doc_id = term_meta->block_meta_list[0].doc_id;
     doc_pos = 0;
@@ -68,7 +70,7 @@ unsigned long long PostingPointer::get_doc_id() const {
     return doc_id;
 }
 
-unsigned long long PostingPointer::get_block_id() const {
+unsigned long long PostingPointer::get_shallow_block_id() const {
     return cur_block_id;
 }
 
@@ -77,7 +79,7 @@ unsigned long long PostingPointer::get_block_count() const {
 }
 
 unsigned long long PostingPointer::get_next_block_doc_id() const {
-    if (cur_block_id + 1 == static_cast<int>(term_meta->block_meta_list.size())) {
+    if (cur_block_id + 1 >= static_cast<int>(term_meta->block_meta_list.size())) {
         return MAX_DOC_ID;
     }
     else {
@@ -130,7 +132,30 @@ void PostingPointer::next_shallow(const unsigned long long target_doc_id) {
         ));
     }
 
-    if (new_block > cur_block_id) {
+    cur_block_id = new_block;
+}
+
+void PostingPointer::next_shallow_deep(const unsigned long long target_doc_id) {
+    auto it = std::upper_bound(
+        term_meta->block_meta_list.begin(),
+        term_meta->block_meta_list.end(),
+        target_doc_id,
+        [&] (unsigned long long val, BlockMeta x) {
+            return val < x.doc_id;
+        }
+    );
+    int new_block = static_cast<int>((it - term_meta->block_meta_list.begin()) - 1);
+    
+    // Impossible given how BMW works.
+    if (new_block < cur_block_id) {
+        throw std::runtime_error(std::format(
+            "Unable to advance PostingPointer: new_block id {} is less than cur_block id {}.",
+            new_block, deep_block_id
+        ));
+    }
+
+    if (new_block > deep_block_id) {
+        deep_block_id = new_block;
         cur_block_id = new_block;
         cur_addr = term_meta->block_meta_list[new_block].start_addr;
         doc_id = term_meta->block_meta_list[new_block].doc_id;
@@ -139,7 +164,7 @@ void PostingPointer::next_shallow(const unsigned long long target_doc_id) {
 }
 
 void PostingPointer::next(const unsigned long long target_doc_id) {
-    next_shallow(target_doc_id);
+    next_shallow_deep(target_doc_id);
 
     if (doc_id >= target_doc_id) {
         return;
@@ -148,7 +173,7 @@ void PostingPointer::next(const unsigned long long target_doc_id) {
     unsigned long long delta;
     unsigned int freq;
     cur_addr += read_posting_entry(delta, freq);
-    for (int i = doc_pos+1; i < get_cur_block_size(cur_block_id); i++){
+    for (int i = doc_pos+1; i < get_cur_block_size(deep_block_id); i++){
         size_t entry_size = read_posting_entry(delta, freq);
         doc_id += delta;
         ++doc_pos;
@@ -159,15 +184,16 @@ void PostingPointer::next(const unsigned long long target_doc_id) {
     }
 
     if (doc_id < target_doc_id) {
+        ++deep_block_id;
         ++cur_block_id;
-        if (cur_block_id == static_cast<int>(term_meta->block_meta_list.size())) {
+        if (deep_block_id == static_cast<int>(term_meta->block_meta_list.size())) {
             cur_addr = term_meta->end_addr;
             doc_id = MAX_DOC_ID;
             doc_pos = 0;
         }
         else {
-            cur_addr = term_meta->block_meta_list[cur_block_id].start_addr;
-            doc_id = term_meta->block_meta_list[cur_block_id].doc_id;
+            cur_addr = term_meta->block_meta_list[deep_block_id].start_addr;
+            doc_id = term_meta->block_meta_list[deep_block_id].doc_id;
             doc_pos = 0;
         }
     }
@@ -218,7 +244,7 @@ size_t PostingPointer::read_posting_entry(
     }
     freq = 0;
     for (size_t i = 0; i < sizeof(unsigned int); i++) {
-        freq += buffer[i] * (1<<(8*i));
+        freq += static_cast<unsigned int>(buffer[i]) * (1<<(8*i));
     }
     return vbe_size + sizeof(unsigned int);
 }
@@ -264,7 +290,7 @@ float evaluate_prefix(
     float running_sum = 0.0;
     unsigned long long doc = postings[pivot].get_doc_id();
     int idx = 0;
-    while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
+    while (idx <static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
         // Prefix of postings has to be tied run of doc_id = doc
         if (postings[idx].get_doc_id() != doc) {
             throw std::runtime_error(std::format(
@@ -314,15 +340,15 @@ void advance_one_excluding(
 ) {
     unsigned long long doc = postings[pivot].get_doc_id();
     
-    float max_idf = -1;
+    unsigned int min_df = N+1;
     int advance_id = -1;
 
     int idx = 0;
     while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() < doc) {
 
-        const float idf = std::log((float)N / (float)postings[idx].get_doc_count());
-        if (idf > max_idf) {
-            max_idf = idf;
+        const unsigned int df = postings[idx].get_doc_count();
+        if (df < min_df) {
+            min_df = df;
             advance_id = idx;
         }
 
@@ -351,6 +377,8 @@ unsigned long long get_new_candidate(
         ++idx;
     }
 
+    if (idx < static_cast<int>(postings.size())) target_doc_id = std::min(target_doc_id, postings[idx].get_doc_id());
+
     return target_doc_id;
 }
 
@@ -362,15 +390,15 @@ void advance_one_including(
 ) {
     unsigned long long doc = postings[pivot].get_doc_id();
     
-    float max_idf = -1;
+    unsigned int min_df = N+1;
     int advance_id = -1;
 
     int idx = 0;
     while (idx < static_cast<int>(postings.size()) && postings[idx].get_doc_id() <= doc) {
 
-        const float idf = std::log((float)N / (float)postings[idx].get_doc_count());
-        if (idf > max_idf) {
-            max_idf = idf;
+        const unsigned int df = postings[idx].get_doc_count();
+        if (df < min_df) {
+            min_df = df;
             advance_id = idx;
         }
 
@@ -395,8 +423,14 @@ std::vector<std::pair<float, unsigned long long>> query (
     int block_size;
     size_t split_size;
 
+    Logger logger(__FILE_NAME__, Logger::INFO);
+
+    logger.log("Loading metadata...");
+
     // Load metadata
     read_metadata(meta_path, in_path, doc_len_path, k1, b, block_size, split_size);
+
+    logger.log("Finished loading metadata, loading doc_len_list...");
 
     // Load doc_len_list
     std::vector<unsigned int> doc_len_list;
@@ -409,14 +443,19 @@ std::vector<std::pair<float, unsigned long long>> query (
     }
     const float avgdl = (float)total_doc_length/(float)doc_len_list.size();
 
+    logger.log("Finished loading doc_len_list. Loading term_meta_mapping...");
+
     // Load term_meta_mapping
     std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping = read_block_meta_file(
         in_path / file_names::BLOCK_META
     );
     std::unordered_map<std::string, TermMeta> term_meta_mapping;
-    for (auto [term,metadata] : raw_term_meta_mapping) {
-        term_meta_mapping[term] = metadata;
+    for (const auto& [term,metadata] : raw_term_meta_mapping) {
+        term_meta_mapping.emplace(std::move(term), std::move(metadata));
     }
+
+    logger.log("Finished loading doc_len_list. Start querying...");
+    auto start = std::chrono::high_resolution_clock::now();
 
     // Filtering terms not indexed
     std::vector<std::string> terms;
@@ -453,7 +492,7 @@ std::vector<std::pair<float, unsigned long long>> query (
         ));
     }
 
-    for (unsigned long long epoch = 0; epoch < (1LL<<34); epoch++) {
+    for (unsigned long long epoch = 0; epoch < (1LL<<32); epoch++) {
         sort_posting(postings);
         
         float theta = top_k.top().first;
@@ -466,6 +505,7 @@ std::vector<std::pair<float, unsigned long long>> query (
         for (int idx = 0; idx < pivot; idx++) {
             postings[idx].next_shallow(doc);
         }
+
 
         bool flag = check_block_max(postings, pivot, theta);
         if (flag) {
@@ -504,5 +544,10 @@ std::vector<std::pair<float, unsigned long long>> query (
         top_k.pop();
     }
     std::reverse(res.begin(), res.end());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    logger.log(std::format("Finished querying. Time elapsed: {}", elapsed));
+
     return res;
 }
