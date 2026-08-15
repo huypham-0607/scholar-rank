@@ -47,15 +47,15 @@ class PostingBuildler:
 
 
     def build(self) -> None:
-        tokenizer = Tokenizer()
-        tokenizer.get_token(
-            self.corpus_path,
-            self.token_stream_path,
-            self.lookup_path,
-            self.get_token_stream_file_name,
-            self.lookup_file_name,
-            self.spill_path,
-        )
+        # tokenizer = Tokenizer()
+        # tokenizer.get_token(
+        #     self.corpus_path,
+        #     self.token_stream_path,
+        #     self.lookup_path,
+        #     self.get_token_stream_file_name,
+        #     self.lookup_file_name,
+        #     self.spill_path,
+        # )
 
         self.posting_path.mkdir(parents=True, exist_ok=True)
         self.partial_path.mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,6 @@ class PostingBuildler:
             self.MEM_LIMIT
         )
         scholar_rank_cpp.merge_inverted_blocks(
-            self.posting_path / scholar_rank_cpp.file_names.DOC_LEN_LIST,
             self.partial_path,
             self.posting_path,
             self.K1,

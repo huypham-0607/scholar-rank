@@ -17,7 +17,9 @@ namespace fs = std::filesystem;
 int main(int argc, char** argv) {
 
     std::string usage_err = std::format(
-        "Usage: {} <doc_len_dir> <in_dir> <out_dir> <optional_flags>\n"
+        "Usage: {} <in_dir> <out_dir> <optional_flags>\n"
+        "out_dir must already contain doc_len_list.bin and doc_len_meta.bin\n"
+        "(construct_doc_len_list output).\n"
         "Optional flags:\n"
         "k1=(float)                 - k1 parameter in BM25. [1,2]\n"
         "b=(float)                  - b parameter in BM25. [0,1]\n"
@@ -25,21 +27,20 @@ int main(int argc, char** argv) {
         "split_size=(size_t)  - Splitting threshold for posting list serialization.",
         argv[0]
     );
-    
-    if (argc < 4 || argc > 8) {
+
+    if (argc < 3 || argc > 7) {
         std::cerr << usage_err << "\n";
         return 1;
     }
 
-    fs::path doc_len_dir = argv[1];
-    fs::path in_dir = argv[2];
-    fs::path out_dir = argv[3];
+    fs::path in_dir = argv[1];
+    fs::path out_dir = argv[2];
 
     float k1 = 1.2f, b = 0.75f;
     int block_size = 128;
     size_t split_size = 1ull << 30;
 
-    for (int i = 4; i < argc; ++i) {
+    for (int i = 3; i < argc; ++i) {
         std::string arg = argv[i];
         auto eq = arg.find('=');
         if (eq == std::string::npos) {
@@ -103,7 +104,7 @@ int main(int argc, char** argv) {
         fs::create_directories(out_dir);
 
         logger.log(std::format(
-            "Merging inverted blocks from {} into {}, using doc length list at {}.\n"
+            "Merging inverted blocks from {} into {}.\n"
             "Params:\n"
             "k1 = {}\n"
             "b = {}\n"
@@ -111,7 +112,6 @@ int main(int argc, char** argv) {
             "split_size = {}",
             in_dir.string(),
             out_dir.string(),
-            doc_len_dir.string(),
             k1,
             b,
             block_size,
@@ -119,7 +119,6 @@ int main(int argc, char** argv) {
         ));
 
         merge_inverted_blocks(
-            doc_len_dir,
             in_dir,
             out_dir,
             k1,

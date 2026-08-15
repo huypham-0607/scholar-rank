@@ -1,5 +1,6 @@
 #include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
+#include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
 
@@ -37,10 +38,8 @@ namespace MergeInvertedBlocksTest {
         void SetUp() override {
             tmp_path = makeUniqueTempDir();
             block_dir = tmp_path / "blocks";
-            doclen_dir = tmp_path / "doclen";
             merge_dir = tmp_path / "merged";
             fs::create_directory(block_dir);
-            fs::create_directory(doclen_dir);
             fs::create_directory(merge_dir);
         }
 
@@ -48,7 +47,7 @@ namespace MergeInvertedBlocksTest {
             fs::remove_all(tmp_path);
         }
 
-        fs::path tmp_path, block_dir, doclen_dir, merge_dir;
+        fs::path tmp_path, block_dir, merge_dir;
 
         // Writes a partial block (write_partial_index / Stream wire format)
         // containing a single term's postings.
@@ -106,22 +105,29 @@ namespace MergeInvertedBlocksTest {
             }
         }
 
-        // Writes doc_len_list.bin directly from (doc_id, len) pairs, given
-        // in increasing doc_id order.
+        // Writes doc_len_list.bin AND doc_len_meta.bin into merge_dir -
+        // merge_inverted_blocks now derives both paths from out_dir itself,
+        // so they must live alongside its other output rather than in a
+        // separate directory. total_docs/total_frequency are derived
+        // directly from entries, matching how construct_doc_len_list
+        // computes them during its own single pass.
         void write_doc_len_list(const std::vector<std::pair<unsigned long long, unsigned int>>& entries) {
-            SafeFile out(doclen_dir / file_names::DOC_LEN_LIST, "wb");
+            SafeFile out(merge_dir / file_names::DOC_LEN_LIST, "wb");
             unsigned long long last = 0;
             unsigned char buf[BUFFER_LIMIT];
+            unsigned long long total_frequency = 0;
             for (auto [doc_id, len] : entries) {
                 int enc_len = vbe_encode(doc_id - last, buf);
                 fwrite(buf, sizeof(unsigned char), enc_len, out.get());
                 fwrite(&len, sizeof(len), 1, out.get());
                 last = doc_id;
+                total_frequency += len;
             }
+            write_doc_len_meta(merge_dir / file_names::DOC_LEN_META, entries.size(), total_frequency);
         }
 
         fs::path doc_len_path() const {
-            return doclen_dir / file_names::DOC_LEN_LIST;
+            return merge_dir / file_names::DOC_LEN_LIST;
         }
 
         // Reads count postings starting at (file_index, start_addr).
@@ -164,7 +170,7 @@ namespace MergeInvertedBlocksTest {
         std::unordered_map<std::string, TermMeta> run_merge(
             float k1 = 1.2f, float b = 0.75f, int block_size = 2, size_t split_size = (1ull << 30)
         ) {
-            merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, k1, b, block_size, split_size);
+            merge_inverted_blocks(block_dir, merge_dir, k1, b, block_size, split_size);
             auto all = read_block_meta_file(merge_dir / file_names::BLOCK_META);
             std::unordered_map<std::string, TermMeta> out;
             for (auto& [term, tm] : all) out[term] = tm;
@@ -399,21 +405,22 @@ namespace MergeInvertedBlocksTest {
             {"bbb", {{1,1}}},
         });
 
-        merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, /*k1=*/1.3f, /*b=*/0.6f, /*block_size=*/4, /*split_size=*/(1ull << 20));
+        merge_inverted_blocks(block_dir, merge_dir, /*k1=*/1.3f, /*b=*/0.6f, /*block_size=*/4, /*split_size=*/(1ull << 20));
 
         // write_metadata writes both a human-readable .txt and the
         // authoritative .bin twin read_metadata actually parses.
         ASSERT_TRUE(fs::exists(merge_dir / file_names::METADATA_TXT));
         ASSERT_TRUE(fs::exists(merge_dir / file_names::METADATA_BIN));
 
-        fs::path posting_dir, doc_len_dir;
+        fs::path posting_dir, doc_len_dir, doc_len_meta_dir;
         float k1, b;
         int block_size;
         size_t split_size;
-        ASSERT_NO_THROW(read_metadata(merge_dir / file_names::METADATA_BIN, posting_dir, doc_len_dir, k1, b, block_size, split_size));
+        ASSERT_NO_THROW(read_metadata(merge_dir / file_names::METADATA_BIN, posting_dir, doc_len_dir, doc_len_meta_dir, k1, b, block_size, split_size));
 
         EXPECT_EQ(posting_dir, merge_dir);
         EXPECT_EQ(doc_len_dir, doc_len_path());
+        EXPECT_EQ(doc_len_meta_dir, merge_dir / file_names::DOC_LEN_META);
         EXPECT_EQ(k1, 1.3f);
         EXPECT_EQ(b, 0.6f);
         EXPECT_EQ(block_size, 4);
@@ -441,18 +448,20 @@ namespace MetadataTest {
         fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         fs::path posting_dir = tmp_path / "posting";
         fs::path doc_len_dir = tmp_path / "doclen";
+        fs::path doc_len_meta_dir = tmp_path / "doclenmeta";
 
-        write_metadata(txt_path, posting_dir, doc_len_dir, 1.2f, 0.75f, 128, (1ull << 30));
+        write_metadata(txt_path, posting_dir, doc_len_dir, doc_len_meta_dir, 1.2f, 0.75f, 128, (1ull << 30));
         ASSERT_TRUE(fs::exists(bin_path));
 
-        fs::path read_posting_dir, read_doc_len_dir;
+        fs::path read_posting_dir, read_doc_len_dir, read_doc_len_meta_dir;
         float k1, b;
         int block_size;
         size_t split_size;
-        read_metadata(bin_path, read_posting_dir, read_doc_len_dir, k1, b, block_size, split_size);
+        read_metadata(bin_path, read_posting_dir, read_doc_len_dir, read_doc_len_meta_dir, k1, b, block_size, split_size);
 
         EXPECT_EQ(read_posting_dir, posting_dir);
         EXPECT_EQ(read_doc_len_dir, doc_len_dir);
+        EXPECT_EQ(read_doc_len_meta_dir, doc_len_meta_dir);
         // Binary storage is exact, unlike the text copy's "%f" formatting
         // (see write_metadata's doc comment) - no tolerance needed.
         EXPECT_EQ(k1, 1.2f);
@@ -471,19 +480,21 @@ namespace MetadataTest {
         fs::path bin_path = tmp_path / file_names::METADATA_BIN;
         fs::path posting_dir = tmp_path / "custom_posting_dir";
         fs::path doc_len_dir = tmp_path / "custom_doclen_dir";
+        fs::path doc_len_meta_dir = tmp_path / "custom_doclenmeta_dir";
         float k1 = 1.69161642f;
         float b = 0.30673251f;
 
-        write_metadata(txt_path, posting_dir, doc_len_dir, k1, b, 256, 12345678ull);
+        write_metadata(txt_path, posting_dir, doc_len_dir, doc_len_meta_dir, k1, b, 256, 12345678ull);
 
-        fs::path read_posting_dir, read_doc_len_dir;
+        fs::path read_posting_dir, read_doc_len_dir, read_doc_len_meta_dir;
         float read_k1, read_b;
         int block_size;
         size_t split_size;
-        read_metadata(bin_path, read_posting_dir, read_doc_len_dir, read_k1, read_b, block_size, split_size);
+        read_metadata(bin_path, read_posting_dir, read_doc_len_dir, read_doc_len_meta_dir, read_k1, read_b, block_size, split_size);
 
         EXPECT_EQ(read_posting_dir, posting_dir);
         EXPECT_EQ(read_doc_len_dir, doc_len_dir);
+        EXPECT_EQ(read_doc_len_meta_dir, doc_len_meta_dir);
         EXPECT_EQ(read_k1, k1);
         EXPECT_EQ(read_b, b);
         EXPECT_EQ(block_size, 256);
@@ -493,7 +504,7 @@ namespace MetadataTest {
     TEST_F(MetadataTest, WriteMetadataAlsoWritesHumanReadableTextFile) {
         fs::path txt_path = tmp_path / file_names::METADATA_TXT;
 
-        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
+        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", tmp_path / "doclenmeta", 1.2f, 0.75f, 128, (1ull << 30));
         ASSERT_TRUE(fs::exists(txt_path));
 
         SafeFile in(txt_path, "r");
@@ -505,6 +516,7 @@ namespace MetadataTest {
 
         EXPECT_NE(content.find("posting_dir="), std::string::npos);
         EXPECT_NE(content.find("doc_len_dir="), std::string::npos);
+        EXPECT_NE(content.find("doc_len_meta_dir="), std::string::npos);
         EXPECT_NE(content.find("k1="), std::string::npos);
         EXPECT_NE(content.find("b="), std::string::npos);
         EXPECT_NE(content.find("block_size="), std::string::npos);
@@ -513,12 +525,12 @@ namespace MetadataTest {
 
     TEST_F(MetadataTest, ReadThrowsOnMissingFile) {
         fs::path bin_path = tmp_path / "does_not_exist.bin";
-        fs::path posting_dir, doc_len_dir;
+        fs::path posting_dir, doc_len_dir, doc_len_meta_dir;
         float k1, b;
         int block_size;
         size_t split_size;
         ASSERT_THROW(
-            read_metadata(bin_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            read_metadata(bin_path, posting_dir, doc_len_dir, doc_len_meta_dir, k1, b, block_size, split_size),
             std::runtime_error
         );
     }
@@ -526,7 +538,7 @@ namespace MetadataTest {
     TEST_F(MetadataTest, ReadThrowsOnFileTruncatedBeforeTrailingField) {
         fs::path txt_path = tmp_path / file_names::METADATA_TXT;
         fs::path bin_path = tmp_path / file_names::METADATA_BIN;
-        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
+        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", tmp_path / "doclenmeta", 1.2f, 0.75f, 128, (1ull << 30));
 
         // Every field up through block_size is intact; split_size (an
         // 8-byte trailing field) is cut short.
@@ -535,12 +547,12 @@ namespace MetadataTest {
         fs::resize_file(bin_path, full_size - 4, ec);
         ASSERT_FALSE(ec);
 
-        fs::path posting_dir, doc_len_dir;
+        fs::path posting_dir, doc_len_dir, doc_len_meta_dir;
         float k1, b;
         int block_size;
         size_t split_size;
         ASSERT_THROW(
-            read_metadata(bin_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            read_metadata(bin_path, posting_dir, doc_len_dir, doc_len_meta_dir, k1, b, block_size, split_size),
             std::runtime_error
         );
     }
@@ -548,19 +560,19 @@ namespace MetadataTest {
     TEST_F(MetadataTest, ReadThrowsOnFileTruncatedMidString) {
         fs::path txt_path = tmp_path / file_names::METADATA_TXT;
         fs::path bin_path = tmp_path / file_names::METADATA_BIN;
-        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", 1.2f, 0.75f, 128, (1ull << 30));
+        write_metadata(txt_path, tmp_path / "posting", tmp_path / "doclen", tmp_path / "doclenmeta", 1.2f, 0.75f, 128, (1ull << 30));
 
         // 1 byte is shorter than even posting_dir's 2-byte length prefix.
         std::error_code ec;
         fs::resize_file(bin_path, 1, ec);
         ASSERT_FALSE(ec);
 
-        fs::path posting_dir, doc_len_dir;
+        fs::path posting_dir, doc_len_dir, doc_len_meta_dir;
         float k1, b;
         int block_size;
         size_t split_size;
         ASSERT_THROW(
-            read_metadata(bin_path, posting_dir, doc_len_dir, k1, b, block_size, split_size),
+            read_metadata(bin_path, posting_dir, doc_len_dir, doc_len_meta_dir, k1, b, block_size, split_size),
             std::runtime_error
         );
     }

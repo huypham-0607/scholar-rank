@@ -89,10 +89,17 @@ void advance_one_including(
     const unsigned long long target_doc_id
 );
 
-std::vector<std::pair<float, unsigned long long>> query (
+std::pair<std::vector<std::pair<float, unsigned long long>>, std::chrono::duration<double, std::milli>> query (
     const fs::path meta_path,
     const std::vector<std::string> raw_terms,
     const int k
+);
+
+std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>, 
+        std::vector<std::chrono::duration<double, std::milli>>> query_batch(
+    const fs::path meta_path,
+    const std::vector<std::vector<std::string>> raw_terms,
+    const std::vector<int> k
 );
 
 #endif

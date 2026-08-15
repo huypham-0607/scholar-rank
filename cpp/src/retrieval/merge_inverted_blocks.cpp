@@ -405,6 +405,7 @@ void write_metadata(
     const fs::path& out_path,
     const fs::path& posting_dir,
     const fs::path& doc_len_dir,
+    const fs::path& doc_len_meta_dir,
     const float k1,
     const float b,
     const int block_size,
@@ -418,6 +419,7 @@ void write_metadata(
 
     res = (res || (std::fprintf(txt_file.get(), "posting_dir=%s\n", posting_dir.string().c_str()) < 0));
     res = (res || (std::fprintf(txt_file.get(), "doc_len_dir=%s\n", doc_len_dir.string().c_str()) < 0));
+    res = (res || (std::fprintf(txt_file.get(), "doc_len_meta_dir=%s\n", doc_len_meta_dir.string().c_str()) < 0));
     res = (res || (std::fprintf(txt_file.get(), "k1=%f\n", k1) < 0));
     res = (res || (std::fprintf(txt_file.get(), "b=%f\n", b) < 0));
     res = (res || (std::fprintf(txt_file.get(), "block_size=%d\n", block_size) < 0));
@@ -447,6 +449,11 @@ void write_metadata(
     fwrite(&doc_len_dir_len, sizeof(doc_len_dir_len), 1, bin_file.get());
     fwrite(doc_len_dir_str.c_str(), sizeof(char), doc_len_dir_len, bin_file.get());
 
+    std::string doc_len_meta_dir_str = doc_len_meta_dir.string();
+    unsigned short doc_len_meta_dir_len = doc_len_meta_dir_str.size();
+    fwrite(&doc_len_meta_dir_len, sizeof(doc_len_meta_dir_len), 1, bin_file.get());
+    fwrite(doc_len_meta_dir_str.c_str(), sizeof(char), doc_len_meta_dir_len, bin_file.get());
+
     fwrite(&k1, sizeof(k1), 1, bin_file.get());
     fwrite(&b, sizeof(b), 1, bin_file.get());
     fwrite(&block_size, sizeof(block_size), 1, bin_file.get());
@@ -457,6 +464,7 @@ void read_metadata(
     const fs::path& in_path,
     fs::path& posting_dir,
     fs::path& doc_len_dir,
+    fs::path& doc_len_meta_dir,
     float& k1,
     float& b,
     int& block_size,
@@ -476,6 +484,12 @@ void read_metadata(
     in_file.fread(&doc_len_dir_str[0], sizeof(char), doc_len_dir_len);
     doc_len_dir = doc_len_dir_str;
 
+    unsigned short doc_len_meta_dir_len;
+    in_file.fread(&doc_len_meta_dir_len, sizeof(doc_len_meta_dir_len), 1);
+    std::string doc_len_meta_dir_str(doc_len_meta_dir_len, '\0');
+    in_file.fread(&doc_len_meta_dir_str[0], sizeof(char), doc_len_meta_dir_len);
+    doc_len_meta_dir = doc_len_meta_dir_str;
+
     // Potentially add validations here.
     in_file.fread(&k1, sizeof(k1), 1);
     in_file.fread(&b, sizeof(b), 1);
@@ -484,7 +498,6 @@ void read_metadata(
 }
 
 void merge_inverted_blocks(
-    const fs::path& doc_len_dir,
     const fs::path& in_dir,
     const fs::path& out_dir,
     const float k1,
@@ -495,6 +508,9 @@ void merge_inverted_blocks(
     Logger logger(__FILE_NAME__, Logger::INFO);
 
     std::vector<unsigned int> doc_len_list;
+
+    fs::path doc_len_dir = out_dir / file_names::DOC_LEN_LIST;
+    fs::path doc_len_meta_dir = out_dir / file_names::DOC_LEN_META;
 
     read_doc_len_list(doc_len_dir, doc_len_list);
 
@@ -591,6 +607,7 @@ void merge_inverted_blocks(
         out_dir / file_names::METADATA_TXT,
         out_dir,
         doc_len_dir,
+        doc_len_meta_dir,
         k1,
         b,
         block_size,

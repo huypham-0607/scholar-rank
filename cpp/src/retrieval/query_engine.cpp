@@ -413,141 +413,185 @@ void advance_one_including(
     postings[advance_id].next(target_doc_id);
 }
 
-std::vector<std::pair<float, unsigned long long>> query (
+class QueryEngine{
+public:
+    QueryEngine(
+        const fs::path meta_path,
+        const Logger& _logger
+    ) : logger(_logger) {
+        logger.log("Initializing QueryEngine...");
+        logger.log("Loading metadata...");
+
+        // Load metadata
+        read_metadata(meta_path, in_path, doc_len_path, doc_len_meta_path, k1, b, block_size, split_size);
+
+        logger.log("Finished loading metadata, loading doc_len_list...");
+
+        // Load doc_len_list
+        std::vector<unsigned int> doc_len_list;
+        read_doc_len_list(doc_len_path, doc_len_list);
+        const auto [total_docs, total_frequency] = read_doc_len_meta(doc_len_meta_path);
+
+        // Compute avgdl
+        avgdl = static_cast<float>(static_cast<double>(total_frequency)/static_cast<double>(total_docs));
+
+        logger.log("Finished loading doc_len_list. Loading term_meta_mapping...");
+
+        // Load term_meta_mapping
+        std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping;
+        raw_term_meta_mapping = read_block_meta_file(
+            in_path / file_names::BLOCK_META
+        );
+
+        for (const auto& [term,metadata] : raw_term_meta_mapping) {
+            term_meta_mapping.emplace(std::move(term), std::move(metadata));
+        }
+        logger.log("Finished loading term_meta_mapping. QueryEngine ready.");
+    }
+
+    std::vector<std::pair<float, unsigned long long>> query(
+        const std::vector<std::string>& raw_terms,
+        const int k
+    ) {
+        // Filtering terms not indexed
+        std::vector<std::string> terms;
+        for (const auto& term : raw_terms) {
+            if (term_meta_mapping.find(term) != term_meta_mapping.end()) {
+                terms.push_back(term);
+            }
+        }
+
+        std::unordered_map<unsigned int, SafeFileMmap> file_index_mapping;
+        for (const auto& term : terms) {
+            unsigned int file_index = term_meta_mapping[term].file_index;
+            if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
+                file_index_mapping.emplace(
+                    file_index,
+                    in_path / file_names::posting_file_name(file_index)
+                );
+            }
+        }
+
+        std::priority_queue<
+            std::pair<float, unsigned long long>,
+            std::vector<std::pair<float, unsigned long long>>,
+            std::greater<std::pair<float, unsigned long long>>
+        > top_k;
+
+        for (int i = 0; i < k; i++) top_k.push(std::make_pair(-1, MAX_DOC_ID));
+
+        std::vector<PostingPointer> postings;
+
+        for (const auto& term : terms) {
+            postings.push_back(PostingPointer(
+                term, block_size, term_meta_mapping, file_index_mapping
+            ));
+        }
+
+        for (unsigned long long epoch = 0; epoch < (1LL<<32); epoch++) {
+            sort_posting(postings);
+            
+            float theta = top_k.top().first;
+            int pivot = find_pivot(postings, theta);
+
+            if (pivot == static_cast<int>(postings.size())) break;
+            unsigned long long doc = postings[pivot].get_doc_id();
+            if (doc == MAX_DOC_ID) break;
+            
+            for (int idx = 0; idx < pivot; idx++) {
+                postings[idx].next_shallow(doc);
+            }
+
+
+            bool flag = check_block_max(postings, pivot, theta);
+            if (flag) {
+                if (postings[0].get_doc_id() == doc) {
+                    float score = evaluate_prefix(
+                        postings,
+                        pivot,
+                        doc_len_list,
+                        avgdl,
+                        k1,
+                        b
+                    );
+                    if (score > theta) {
+                        top_k.pop();
+                        top_k.push(std::make_pair(score, doc));
+                    }
+                    advance_prefix(
+                        postings,
+                        pivot,
+                        doc + 1
+                    );
+                }
+                else {
+                    advance_one_excluding(postings, pivot, doc_len_list.size(), doc);
+                }
+            }
+            else {
+                unsigned long long target_doc_id = get_new_candidate(postings, pivot);
+                advance_one_including(postings, pivot, doc_len_list.size(), target_doc_id);
+            }
+        }
+
+        std::vector<std::pair<float, unsigned long long>> res;
+        while (!top_k.empty()) {
+            if (top_k.top().first != -1) res.push_back(top_k.top());
+            top_k.pop();
+        }
+        std::reverse(res.begin(), res.end());
+        return res;
+    }
+
+private:
+    Logger logger;
+    fs::path in_path, doc_len_path, doc_len_meta_path;
+    float k1, b;
+    int block_size;
+    size_t split_size;
+    std::vector<unsigned int> doc_len_list;
+    float avgdl;
+    std::unordered_map<std::string, TermMeta> term_meta_mapping;
+};
+
+std::pair<std::vector<std::pair<float, unsigned long long>>, std::chrono::duration<double, std::milli>> query (
     const fs::path meta_path,
     const std::vector<std::string> raw_terms,
     const int k
 ) {
-    fs::path in_path, doc_len_path;
-    float k1, b;
-    int block_size;
-    size_t split_size;
-
     Logger logger(__FILE_NAME__, Logger::INFO);
+    QueryEngine engine(meta_path, logger);
 
-    logger.log("Loading metadata...");
-
-    // Load metadata
-    read_metadata(meta_path, in_path, doc_len_path, k1, b, block_size, split_size);
-
-    logger.log("Finished loading metadata, loading doc_len_list...");
-
-    // Load doc_len_list
-    std::vector<unsigned int> doc_len_list;
-    read_doc_len_list(doc_len_path, doc_len_list);
-
-    // Compute avgdl
-    unsigned long long total_doc_length = 0;
-    for (unsigned long long i = 0; i < doc_len_list.size(); i++) {
-        total_doc_length += doc_len_list[i];
-    }
-    const float avgdl = (float)total_doc_length/(float)doc_len_list.size();
-
-    logger.log("Finished loading doc_len_list. Loading term_meta_mapping...");
-
-    // Load term_meta_mapping
-    std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping = read_block_meta_file(
-        in_path / file_names::BLOCK_META
-    );
-    std::unordered_map<std::string, TermMeta> term_meta_mapping;
-    for (const auto& [term,metadata] : raw_term_meta_mapping) {
-        term_meta_mapping.emplace(std::move(term), std::move(metadata));
-    }
-
-    logger.log("Finished loading doc_len_list. Start querying...");
     auto start = std::chrono::high_resolution_clock::now();
-
-    // Filtering terms not indexed
-    std::vector<std::string> terms;
-    for (const auto& term : raw_terms) {
-        if (term_meta_mapping.find(term) != term_meta_mapping.end()) {
-            terms.push_back(term);
-        }
-    }
-
-    std::unordered_map<unsigned int, SafeFileMmap> file_index_mapping;
-    for (const auto& term : terms) {
-        unsigned int file_index = term_meta_mapping[term].file_index;
-        if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
-            file_index_mapping.emplace(
-                file_index,
-                in_path / file_names::posting_file_name(file_index)
-            );
-        }
-    }
-
-    std::priority_queue<
-        std::pair<float, unsigned long long>,
-        std::vector<std::pair<float, unsigned long long>>,
-        std::greater<std::pair<float, unsigned long long>>
-    > top_k;
-
-    for (int i = 0; i < k; i++) top_k.push(std::make_pair(-1, MAX_DOC_ID));
-
-    std::vector<PostingPointer> postings;
-
-    for (const auto& term : terms) {
-        postings.push_back(PostingPointer(
-            term, block_size, term_meta_mapping, file_index_mapping
-        ));
-    }
-
-    for (unsigned long long epoch = 0; epoch < (1LL<<32); epoch++) {
-        sort_posting(postings);
-        
-        float theta = top_k.top().first;
-        int pivot = find_pivot(postings, theta);
-
-        if (pivot == static_cast<int>(postings.size())) break;
-        unsigned long long doc = postings[pivot].get_doc_id();
-        if (doc == MAX_DOC_ID) break;
-        
-        for (int idx = 0; idx < pivot; idx++) {
-            postings[idx].next_shallow(doc);
-        }
-
-
-        bool flag = check_block_max(postings, pivot, theta);
-        if (flag) {
-            if (postings[0].get_doc_id() == doc) {
-                float score = evaluate_prefix(
-                    postings,
-                    pivot,
-                    doc_len_list,
-                    avgdl,
-                    k1,
-                    b
-                );
-                if (score > theta) {
-                    top_k.pop();
-                    top_k.push(std::make_pair(score, doc));
-                }
-                advance_prefix(
-                    postings,
-                    pivot,
-                    doc + 1
-                );
-            }
-            else {
-                advance_one_excluding(postings, pivot, doc_len_list.size(), doc);
-            }
-        }
-        else {
-            unsigned long long target_doc_id = get_new_candidate(postings, pivot);
-            advance_one_including(postings, pivot, doc_len_list.size(), target_doc_id);
-        }
-    }
-
-    std::vector<std::pair<float, unsigned long long>> res;
-    while (!top_k.empty()) {
-        if (top_k.top().first != -1) res.push_back(top_k.top());
-        top_k.pop();
-    }
-    std::reverse(res.begin(), res.end());
-
+    std::vector<std::pair<float, unsigned long long>> result = engine.query(raw_terms, k);
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> elapsed = end - start;
     logger.log(std::format("Finished querying. Time elapsed: {}", elapsed));
+    
+    return std::make_pair(result,elapsed);
+}
 
-    return res;
+std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>, 
+        std::vector<std::chrono::duration<double, std::milli>>> query_batch (
+    const fs::path meta_path,
+    const std::vector<std::vector<std::string>> raw_terms,
+    const std::vector<int> k
+) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
+    QueryEngine engine(meta_path, logger);
+
+    std::vector<std::vector<std::pair<float, unsigned long long>>> results;
+    std::vector<std::chrono::duration<double, std::milli>> benchmarks;
+    for (size_t i = 0; i < raw_terms.size(); i++) {
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        results.push_back(engine.query(raw_terms[i], k[i]));
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        logger.log(std::format("Finished query {}. Time elapsed: {}", i+1, elapsed));
+        benchmarks.push_back(elapsed);
+    }
+
+    return std::make_pair(results, benchmarks);
 }

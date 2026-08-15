@@ -16,6 +16,7 @@ namespace file_names {
     inline constexpr const char* METADATA_BIN = "metadata.bin";
     inline constexpr const char* METADATA_BIN_EXTENSION = ".bin";
     inline constexpr const char* DOC_LEN_LIST = "doc_len_list.bin";
+    inline constexpr const char* DOC_LEN_META = "doc_len_meta.bin";
 
     // Extension used when globbing a directory for partial SPIMI input
     // files (block_*.bin / token_*.bin) - matched by extension only, not

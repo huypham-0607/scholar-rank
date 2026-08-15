@@ -15,6 +15,7 @@ PYBIND11_MODULE(scholar_rank_cpp, m) {
     fn.attr("METADATA_TXT") = file_names::METADATA_TXT;
     fn.attr("METADATA_BIN") = file_names::METADATA_BIN;
     fn.attr("DOC_LEN_LIST") = file_names::DOC_LEN_LIST;
+    fn.attr("DOC_LEN_META") = file_names::DOC_LEN_META;
     fn.def("posting_file_name", &file_names::posting_file_name, py::arg("file_index"));
     fn.def("partial_block_file_name", &file_names::partial_block_file_name, py::arg("block_index"));
 
@@ -35,9 +36,10 @@ PYBIND11_MODULE(scholar_rank_cpp, m) {
     m.def(
         "merge_inverted_blocks",
         &merge_inverted_blocks,
-        py::arg("doc_len_dir"), py::arg("in_dir"), py::arg("out_dir"),
+        py::arg("in_dir"), py::arg("out_dir"),
         py::arg("k1"), py::arg("b"), py::arg("block_size"), py::arg("split_size"),
-        "Merge partial inverted index blocks into complete posting lists."
+        "Merge partial inverted index blocks into complete posting lists. "
+        "out_dir must already contain doc_len_list.bin and doc_len_meta.bin."
     );
 
     m.def(

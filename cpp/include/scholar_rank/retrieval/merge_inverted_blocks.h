@@ -61,16 +61,19 @@ struct TermMeta {
  * a small, fixed number of final posting-data files plus one consolidated
  * BMW block-metadata file (out_dir / "block_meta.bin").
  *
- * @param doc_len_dir path to doc_len_list.bin (construct_doc_len_list output)
+ * Expects out_dir to already contain doc_len_list.bin and doc_len_meta.bin
+ * (construct_doc_len_list output, written to the same directory) - their
+ * paths are derived internally from out_dir, not passed in.
+ *
  * @param in_dir directory containing partial block_*.bin files
- * @param out_dir directory to write posting_*.bin + block_meta.bin into
+ * @param out_dir directory containing doc_len_list.bin/doc_len_meta.bin,
+ * and to write posting_*.bin + block_meta.bin into
  * @param k1 BM25 k1 parameter
  * @param b BM25 b parameter
  * @param block_size number of postings per BMW block
  * @param split_size approximate max bytes per posting_*.bin output file
  */
 void merge_inverted_blocks(
-    const std::filesystem::path& doc_len_dir,
     const std::filesystem::path& in_dir,
     const std::filesystem::path& out_dir,
     const float k1 = 1.2f,
@@ -84,18 +87,20 @@ std::vector<std::pair<std::string, TermMeta>> read_block_meta_file(
 );
 
 /**
- * @brief Write index build metadata (posting_dir, doc_len_dir, k1, b,
- * block_size, split_size) in two forms: a plain-text key=value file at
- * out_path, one field per line - for humans to read/inspect, never read
- * back programmatically - and a binary twin at out_path with its extension
- * replaced by ".bin" - the exact, length-prefixed-string + fixed-width-field
- * encoding read_metadata actually parses.
+ * @brief Write index build metadata (posting_dir, doc_len_dir,
+ * doc_len_meta_dir, k1, b, block_size, split_size) in two forms: a
+ * plain-text key=value file at out_path, one field per line - for humans
+ * to read/inspect, never read back programmatically - and a binary twin
+ * at out_path with its extension replaced by ".bin" - the exact,
+ * length-prefixed-string + fixed-width-field encoding read_metadata
+ * actually parses.
  *
  *
  * @param out_path path to write the human-readable metadata file to; the
  * binary file is written alongside it with the same stem and a .bin extension
  * @param posting_dir directory containing this index's posting_*.bin files
- * @param doc_len_dir directory containing this index's doc_len_list.bin
+ * @param doc_len_dir path to this index's doc_len_list.bin
+ * @param doc_len_meta_dir path to this index's doc_len_meta.bin
  * @param k1 BM25 k1 parameter the index was built with
  * @param b BM25 b parameter the index was built with
  * @param block_size BMW block size the index was built with
@@ -105,6 +110,7 @@ void write_metadata(
     const std::filesystem::path& out_path,
     const std::filesystem::path& posting_dir,
     const std::filesystem::path& doc_len_dir,
+    const std::filesystem::path& doc_len_meta_dir,
     const float k1,
     const float b,
     const int block_size,
@@ -122,6 +128,7 @@ void read_metadata(
     const std::filesystem::path& in_path,
     std::filesystem::path& posting_dir,
     std::filesystem::path& doc_len_dir,
+    std::filesystem::path& doc_len_meta,
     float& k1,
     float& b,
     int& block_size,

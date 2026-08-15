@@ -11,6 +11,16 @@ void write_doc_len_entry(
     const unsigned int& freq
 );
 
+void write_doc_len_meta(
+    const fs::path out_path,
+    unsigned long long total_docs,
+    unsigned long long total_frequency
+);
+
+const std::pair<unsigned long long, unsigned long long> read_doc_len_meta(
+    const fs::path in_path
+);
+
 /**
  * @brief Construct doc_id - doc_len sequence (out_dir/doc_len_list.bin).
  *

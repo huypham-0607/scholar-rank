@@ -1,6 +1,7 @@
 #include "scholar_rank/retrieval/query_engine.h"
 #include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/merge_inverted_blocks.h"
+#include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/retrieval/bm25.h"
 #include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
@@ -668,10 +669,8 @@ namespace QueryEndToEndTest {
         void SetUp() override {
             tmp_path = makeUniqueTempDir();
             block_dir = tmp_path / "blocks";
-            doclen_dir = tmp_path / "doclen";
             merge_dir = tmp_path / "merged";
             fs::create_directory(block_dir);
-            fs::create_directory(doclen_dir);
             fs::create_directory(merge_dir);
         }
 
@@ -679,18 +678,27 @@ namespace QueryEndToEndTest {
             fs::remove_all(tmp_path);
         }
 
-        fs::path tmp_path, block_dir, doclen_dir, merge_dir;
+        fs::path tmp_path, block_dir, merge_dir;
 
+        // Writes doc_len_list.bin AND doc_len_meta.bin into merge_dir -
+        // merge_inverted_blocks now derives both paths from out_dir itself,
+        // so they must live alongside its other output rather than in a
+        // separate directory. total_docs/total_frequency are derived
+        // directly from entries, matching how construct_doc_len_list
+        // computes them during its own single pass.
         void write_doc_len_list(const std::vector<std::pair<unsigned long long, unsigned int>>& entries) {
-            SafeFile out(doclen_dir / file_names::DOC_LEN_LIST, "wb");
+            SafeFile out(merge_dir / file_names::DOC_LEN_LIST, "wb");
             unsigned long long last = 0;
             unsigned char buf[BUFFER_LIMIT];
+            unsigned long long total_frequency = 0;
             for (auto [doc_id, len] : entries) {
                 int enc_len = vbe_encode(doc_id - last, buf);
                 fwrite(buf, sizeof(unsigned char), enc_len, out.get());
                 fwrite(&len, sizeof(len), 1, out.get());
                 last = doc_id;
+                total_frequency += len;
             }
+            write_doc_len_meta(merge_dir / file_names::DOC_LEN_META, entries.size(), total_frequency);
         }
 
         void write_raw_block_multi(
@@ -719,12 +727,8 @@ namespace QueryEndToEndTest {
             }
         }
 
-        fs::path doc_len_path() const {
-            return doclen_dir / file_names::DOC_LEN_LIST;
-        }
-
         fs::path build_index(float k1 = 1.2f, float b = 0.75f, int block_size = 128, size_t split_size = (1ull << 30)) {
-            merge_inverted_blocks(doc_len_path(), block_dir, merge_dir, k1, b, block_size, split_size);
+            merge_inverted_blocks(block_dir, merge_dir, k1, b, block_size, split_size);
             return merge_dir / file_names::METADATA_BIN;
         }
     };
