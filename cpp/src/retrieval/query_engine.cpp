@@ -428,7 +428,6 @@ public:
         logger.log("Finished loading metadata, loading doc_len_list...");
 
         // Load doc_len_list
-        std::vector<unsigned int> doc_len_list;
         read_doc_len_list(doc_len_path, doc_len_list);
         const auto [total_docs, total_frequency] = read_doc_len_meta(doc_len_meta_path);
 
@@ -461,7 +460,6 @@ public:
             }
         }
 
-        std::unordered_map<unsigned int, SafeFileMmap> file_index_mapping;
         for (const auto& term : terms) {
             unsigned int file_index = term_meta_mapping[term].file_index;
             if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
@@ -552,6 +550,7 @@ private:
     std::vector<unsigned int> doc_len_list;
     float avgdl;
     std::unordered_map<std::string, TermMeta> term_meta_mapping;
+    std::unordered_map<unsigned int, SafeFileMmap> file_index_mapping;
 };
 
 std::pair<std::vector<std::pair<float, unsigned long long>>, std::chrono::duration<double, std::milli>> query (

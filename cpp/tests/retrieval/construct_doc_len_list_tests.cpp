@@ -91,6 +91,83 @@ namespace WriteDocLenEntryTest {
     }
 }
 
+namespace DocLenMetaTest {
+    class DocLenMetaTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+    };
+
+    TEST_F(DocLenMetaTest, WriteThenReadRoundTrips) {
+        fs::path meta_path = tmp_path / file_names::DOC_LEN_META;
+
+        ASSERT_NO_THROW(write_doc_len_meta(meta_path, 12345, 987654321));
+
+        auto [total_docs, total_frequency] = read_doc_len_meta(meta_path);
+        EXPECT_EQ(total_docs, 12345);
+        EXPECT_EQ(total_frequency, 987654321);
+    }
+
+    TEST_F(DocLenMetaTest, WriteThenReadRoundTripsWithZeroValues) {
+        // Edge case: an empty corpus (construct_doc_len_list ran over no
+        // documents at all) still needs a well-formed meta file.
+        fs::path meta_path = tmp_path / file_names::DOC_LEN_META;
+
+        ASSERT_NO_THROW(write_doc_len_meta(meta_path, 0, 0));
+
+        auto [total_docs, total_frequency] = read_doc_len_meta(meta_path);
+        EXPECT_EQ(total_docs, 0);
+        EXPECT_EQ(total_frequency, 0);
+    }
+
+    TEST_F(DocLenMetaTest, WriteThenReadRoundTripsWithValuesNearUnsignedLongLongMax) {
+        // Both fields are stored raw (no VBE/delta encoding), so this is a
+        // straightforward "no silent truncation" check rather than a
+        // regression for a specific past bug.
+        fs::path meta_path = tmp_path / file_names::DOC_LEN_META;
+        unsigned long long near_max = ~0ULL - 1;
+
+        ASSERT_NO_THROW(write_doc_len_meta(meta_path, near_max, near_max));
+
+        auto [total_docs, total_frequency] = read_doc_len_meta(meta_path);
+        EXPECT_EQ(total_docs, near_max);
+        EXPECT_EQ(total_frequency, near_max);
+    }
+
+    TEST_F(DocLenMetaTest, ReadThrowsOnMissingFile) {
+        fs::path meta_path = tmp_path / "does_not_exist.bin";
+        ASSERT_THROW(read_doc_len_meta(meta_path), std::runtime_error);
+    }
+
+    TEST_F(DocLenMetaTest, ReadThrowsOnFileTruncatedMidSecondField) {
+        fs::path meta_path = tmp_path / file_names::DOC_LEN_META;
+        write_doc_len_meta(meta_path, 42, 1000);
+
+        // total_docs (8 bytes) is intact; total_frequency is cut short.
+        auto full_size = fs::file_size(meta_path);
+        std::error_code ec;
+        fs::resize_file(meta_path, full_size - 4, ec);
+        ASSERT_FALSE(ec);
+
+        ASSERT_THROW(read_doc_len_meta(meta_path), std::runtime_error);
+    }
+
+    TEST_F(DocLenMetaTest, ReadThrowsOnEmptyFile) {
+        fs::path meta_path = tmp_path / file_names::DOC_LEN_META;
+        { SafeFile fp(meta_path, "wb"); }
+
+        ASSERT_THROW(read_doc_len_meta(meta_path), std::runtime_error);
+    }
+}
+
 namespace ConstructDocLenListTest {
     class ConstructDocLenListTest : public testing::Test {
     protected:

@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
+#include <pybind11/chrono.h>
 #include "scholar_rank/retrieval/query_engine.h"
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/retrieval/construct_inverted_blocks.h"
@@ -46,6 +47,19 @@ PYBIND11_MODULE(scholar_rank_cpp, m) {
         "query",
         &query,
         py::arg("meta_path"), py::arg("terms"), py::arg("k"),
-        "Run BMW/WAND top-k BM25 query, returns (score, doc_id) pairs best-first."
+        "Run BMW/WAND top-k BM25 query. Returns (results, elapsed): results is "
+        "a list of (score, doc_id) pairs best-first, elapsed is the query's "
+        "own execution time (index load time is not included)."
+    );
+
+    m.def(
+        "query_batch",
+        &query_batch,
+        py::arg("meta_path"), py::arg("terms"), py::arg("k"),
+        "Run multiple BMW/WAND queries against one index load. terms and k "
+        "must be the same length - terms[i]/k[i] are paired per query. "
+        "Returns (results, elapsed): both lists are in the same order as "
+        "terms, each elapsed entry covering only that query's own execution "
+        "time, not the shared index load."
     );
 }

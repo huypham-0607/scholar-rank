@@ -764,7 +764,7 @@ namespace QueryEndToEndTest {
         // query() reverses the min-heap pop order before returning, so
         // results come back best-first (non-increasing scores).
 
-        auto res = query(meta_path, {"cat", "dog"}, 2);
+        auto [res, elapsed] = query(meta_path, {"cat", "dog"}, 2);
         ASSERT_EQ(res.size(), 2u);
         // The two best (highest-score) candidates are the last two of `expected`.
         EXPECT_EQ(res[0].second, expected[3].second);
@@ -782,7 +782,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {"cat", "dog", "bird"}, 4);
+        auto [res, elapsed] = query(meta_path, {"cat", "dog", "bird"}, 4);
         ASSERT_GE(res.size(), 2u) << "need at least 2 results for a non-trivial ordering check";
         for (size_t i = 1; i < res.size(); i++) {
             EXPECT_GE(res[i-1].first, res[i].first)
@@ -798,7 +798,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {"bird"}, 1);
+        auto [res, elapsed] = query(meta_path, {"bird"}, 1);
         ASSERT_EQ(res.size(), 1u);
         EXPECT_EQ(res[0].second, 3u);
     }
@@ -810,7 +810,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {"bird"}, 5);
+        auto [res, elapsed] = query(meta_path, {"bird"}, 5);
         ASSERT_EQ(res.size(), 1u) << "must not pad out to k with (-1, MAX_DOC_ID) sentinels";
         EXPECT_EQ(res[0].second, 3u);
     }
@@ -822,7 +822,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {"cat"}, 2);
+        auto [res, elapsed] = query(meta_path, {"cat"}, 2);
         EXPECT_EQ(res.size(), 2u) << "cat matches 3 docs but k=2 must cap the result count";
     }
 
@@ -833,7 +833,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {"nonexistent_term"}, 3);
+        auto [res, elapsed] = query(meta_path, {"nonexistent_term"}, 3);
         EXPECT_TRUE(res.empty());
     }
 
@@ -844,7 +844,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto res = query(meta_path, {}, 3);
+        auto [res, elapsed] = query(meta_path, {}, 3);
         EXPECT_TRUE(res.empty());
     }
 
@@ -864,12 +864,84 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index(1.2f, 0.75f, /*block_size=*/1);
 
-        auto res = query(meta_path, {"x", "y"}, 6);
+        auto [res, elapsed] = query(meta_path, {"x", "y"}, 6);
         ASSERT_EQ(res.size(), 6u) << "every one of the 6 matching documents must be returned";
 
         std::vector<unsigned long long> doc_ids;
         for (auto& [score, doc_id] : res) doc_ids.push_back(doc_id);
         std::sort(doc_ids.begin(), doc_ids.end());
         EXPECT_EQ(doc_ids, (std::vector<unsigned long long>{0,1,2,3,4,5}));
+    }
+
+    TEST_F(QueryEndToEndTest, QueryBatchMatchesIndividualQueryResultsInOrder) {
+        write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
+            {"cat",  {{0,1},{2,2},{4,1}}},
+            {"dog",  {{1,1},{2,1}}},
+            {"bird", {{3,1}}},
+        });
+        fs::path meta_path = build_index();
+
+        auto [cat_res, cat_elapsed] = query(meta_path, {"cat"}, 3);
+        auto [dog_res, dog_elapsed] = query(meta_path, {"dog"}, 3);
+        auto [bird_res, bird_elapsed] = query(meta_path, {"bird"}, 3);
+
+        auto [batch_res, batch_elapsed] = query_batch(
+            meta_path, {{"cat"}, {"dog"}, {"bird"}}, {3, 3, 3}
+        );
+
+        ASSERT_EQ(batch_res.size(), 3u);
+        EXPECT_EQ(batch_res[0], cat_res)
+            << "query_batch result 0 should match an individual query('cat') call";
+        EXPECT_EQ(batch_res[1], dog_res)
+            << "query_batch result 1 should match an individual query('dog') call";
+        EXPECT_EQ(batch_res[2], bird_res)
+            << "query_batch result 2 should match an individual query('bird') call";
+    }
+
+    TEST_F(QueryEndToEndTest, QueryBatchReturnsOneElapsedEntryPerQuery) {
+        write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
+            {"cat", {{0,1},{2,2},{4,1}}},
+            {"dog", {{1,1},{2,1}}},
+        });
+        fs::path meta_path = build_index();
+
+        auto [batch_res, batch_elapsed] = query_batch(
+            meta_path, {{"cat"}, {"dog"}}, {2, 2}
+        );
+        EXPECT_EQ(batch_elapsed.size(), 2u)
+            << "one elapsed duration must be reported per query, not one for the whole batch";
+    }
+
+    TEST_F(QueryEndToEndTest, QueryBatchHandlesMixOfMatchingAndNonMatchingQueries) {
+        write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
+            {"cat", {{0,1},{2,2},{4,1}}},
+        });
+        fs::path meta_path = build_index();
+
+        auto [batch_res, batch_elapsed] = query_batch(
+            meta_path, {{"cat"}, {"nonexistent_term"}, {}}, {3, 3, 3}
+        );
+        ASSERT_EQ(batch_res.size(), 3u);
+        EXPECT_EQ(batch_res[0].size(), 3u) << "cat matches 3 documents";
+        EXPECT_TRUE(batch_res[1].empty()) << "unindexed term must return no results";
+        EXPECT_TRUE(batch_res[2].empty()) << "empty query must return no results";
+    }
+
+    TEST_F(QueryEndToEndTest, QueryBatchRespectsPerQueryK) {
+        write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
+        write_raw_block_multi(file_names::partial_block_file_name(0), {
+            {"cat", {{0,1},{2,2},{4,1}}},
+        });
+        fs::path meta_path = build_index();
+
+        auto [batch_res, batch_elapsed] = query_batch(
+            meta_path, {{"cat"}, {"cat"}}, {1, 2}
+        );
+        ASSERT_EQ(batch_res.size(), 2u);
+        EXPECT_EQ(batch_res[0].size(), 1u) << "first query's k=1 must cap its own result count";
+        EXPECT_EQ(batch_res[1].size(), 2u) << "second query's k=2 is independent of the first";
     }
 }

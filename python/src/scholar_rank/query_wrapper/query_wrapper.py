@@ -17,7 +17,7 @@ def retrieve(
     tokenizer = Tokenizer()
     terms = tokenizer.tokenize_query(query_string)
     meta_path = root_path / posting_folder / scholar_rank_cpp.file_names.METADATA_BIN
-    results = scholar_rank_cpp.query(
+    results, elapsed = scholar_rank_cpp.query(
         meta_path,
         terms,
         k
