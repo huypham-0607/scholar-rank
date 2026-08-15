@@ -12,10 +12,10 @@ __pycache__/
 # Makefiles
 */build/
 
-
 # Misc
 .vscode/
 Logs/
+.cph/
 
 # x3 nuzzles pounces on u UwU u so warm
 CLAUDE.md

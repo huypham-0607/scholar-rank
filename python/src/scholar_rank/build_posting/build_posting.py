@@ -47,15 +47,15 @@ class PostingBuildler:
 
 
     def build(self) -> None:
-        # tokenizer = Tokenizer()
-        # tokenizer.get_token(
-        #     self.corpus_path,
-        #     self.token_stream_path,
-        #     self.lookup_path,
-        #     self.get_token_stream_file_name,
-        #     self.lookup_file_name,
-        #     self.spill_path,
-        # )
+        tokenizer = Tokenizer()
+        tokenizer.get_token(
+            self.corpus_path,
+            self.token_stream_path,
+            self.lookup_path,
+            self.get_token_stream_file_name,
+            self.lookup_file_name,
+            self.spill_path,
+        )
 
         self.posting_path.mkdir(parents=True, exist_ok=True)
         self.partial_path.mkdir(parents=True, exist_ok=True)

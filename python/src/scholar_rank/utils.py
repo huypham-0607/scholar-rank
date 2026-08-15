@@ -1,5 +1,6 @@
 import logging
 import sys
+import tomllib
 
 from datetime import datetime
 from pathlib import Path
@@ -27,3 +28,9 @@ def get_logger(name: str) -> logging.Logger:
 def get_current_time() -> str:
     formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z %z")
     return formatted_time
+
+def load_config() -> dict:
+    CONFIG_PATH = PROJECT_ROOT / "project-config.toml"
+
+    with open(CONFIG_PATH, "rb") as f:
+        return tomllib.load(f)

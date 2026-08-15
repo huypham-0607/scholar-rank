@@ -56,8 +56,8 @@ int main(int argc, char** argv) {
                 std::cerr << std::format("Cannot convert value {} to type 'float' for flag {}", val, key) << "\n";
                 return 1;
             }
-            if (k1 < 1 || 2 < k1) {
-                std::cerr << std::format("Value {} for flag {} out of range [1,2]", k1, key) << "\n";
+            if (k1 < 0.1f || 5.0f < k1) {
+                std::cerr << std::format("Value {} for flag {} out of range [0.1,5.0]", k1, key) << "\n";
                 return 1;  
             }
         }

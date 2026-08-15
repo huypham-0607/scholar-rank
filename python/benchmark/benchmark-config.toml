@@ -1,0 +1,8 @@
+[paths]
+benchmark-dir = "/data/scholar_rank/benchmark"
+spill-dir = "/data/scholar_rank/benchmark/spill"
+
+[msmarco]
+data-dir = "/data/msmarco"
+posting-dir = "/data/scholar_rank/benchmark/msmarco"
+
