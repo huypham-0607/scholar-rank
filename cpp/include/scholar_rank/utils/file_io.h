@@ -14,6 +14,9 @@ namespace fs = std::filesystem;
  * @brief C style FileIO wrapper for safe file descriptor handling.
  * 
  */
+
+const size_t MIN_BUF_SIZE = (1<<16);
+
 class SafeFile{
 public:
     SafeFile(const fs::path& path, const char* mode);
@@ -40,6 +43,27 @@ public:
 private:
     FILE* fp;
     fs::path file_path;
+};
+
+class BufferedWriter{
+public:
+    BufferedWriter(const fs::path& path, const size_t buf_size);
+    ~BufferedWriter();
+
+    BufferedWriter(const BufferedWriter&) = delete;
+    BufferedWriter& operator=(const BufferedWriter&) = delete;
+    BufferedWriter(BufferedWriter&& other) = delete;
+    BufferedWriter& operator=(const BufferedWriter&&) = delete;
+
+    void fwrite(const void* const buffer, const std::size_t size, const std::size_t count);
+
+    const long ftell(); 
+private:
+    SafeFile file;
+    std::vector<unsigned char> buffer;
+    size_t ptr;
+
+    void flush();
 };
 
 /**

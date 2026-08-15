@@ -6,7 +6,7 @@
 #include <vector>
 
 void write_doc_len_entry(
-    const SafeFile& out_fp,
+    BufferedWriter& out_fp,
     const unsigned long long& delta,
     const unsigned int& freq
 );

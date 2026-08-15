@@ -34,8 +34,11 @@
 #include <queue>
 #include <stdexcept>
 #include <unordered_map>
+#include <optional>
 
 namespace fs = std::filesystem;
+
+constexpr size_t BUF_SIZE = (1<<20);
 
 BlockMeta::BlockMeta(
     unsigned long long _doc_id,
@@ -190,7 +193,7 @@ private:
  */
 BlockMeta flush_buffer(
     PostingList& buffer,
-    const SafeFile& out_file,
+    BufferedWriter& out_file,
     const std::vector<unsigned int>& doc_len_list,
     const float avgdl,
     const float k1,
@@ -199,7 +202,7 @@ BlockMeta flush_buffer(
 ) {
     unsigned long long start_doc_id = buffer[0].doc_id;
 
-    size_t start_addr = (size_t)ftell(out_file.get());
+    size_t start_addr = (size_t)out_file.ftell();
 
     float max_saturation = 0.0f;
     unsigned long long last = 0;
@@ -209,8 +212,8 @@ BlockMeta flush_buffer(
         const PostingItem& item = buffer[i];
         unsigned long long posting_delta = item.doc_id - last;
         int encode_length = vbe_encode(posting_delta, vbe_buffer);
-        fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
-        fwrite(&item.freq, sizeof(item.freq), 1, out_file.get());
+        out_file.fwrite(vbe_buffer, sizeof(unsigned char), encode_length);
+        out_file.fwrite(&item.freq, sizeof(item.freq), 1);
         last = item.doc_id;
         bytes_written += encode_length + sizeof(item.freq);
 
@@ -229,7 +232,7 @@ size_t build_posting_list(
     const std::vector<int>& valid_streams,
     std::vector<Stream>& streams,
     const std::vector<unsigned int>& doc_len_list,
-    const SafeFile& out_file,
+    BufferedWriter& out_file,
     const unsigned int file_index,
     std::unordered_map<std::string,TermMeta>& term_meta_mapping,
     const int block_size,
@@ -294,7 +297,7 @@ size_t build_posting_list(
 
     // Exclusive end of this term's byte range - every write for this term
     // just finished, so the file cursor is now one past its last byte.
-    term_meta.end_addr = (size_t)ftell(out_file.get());
+    term_meta.end_addr = (size_t)out_file.ftell();
 
     // df_t (term_meta.doc_count) is only known now that the term's heap is
     // fully drained - apply IDF retroactively to every block this term
@@ -327,20 +330,20 @@ void write_block_meta_file(
     const fs::path& out_path,
     const std::unordered_map<std::string, TermMeta>& term_meta_mapping
 ) {
-    SafeFile out_file(out_path, "wb");
+    BufferedWriter out_file(out_path, BUF_SIZE);
 
     for (const auto& [term, term_meta] : term_meta_mapping) {
         unsigned short term_size = term.size();
-        fwrite(&term_size, sizeof(term_size), 1, out_file.get());
-        fwrite(term.c_str(), sizeof(char), term_size, out_file.get());
+        out_file.fwrite(&term_size, sizeof(term_size), 1);
+        out_file.fwrite(term.c_str(), sizeof(char), term_size);
 
-        fwrite(&term_meta.term_ub, sizeof(term_meta.term_ub), 1, out_file.get());
-        fwrite(&term_meta.end_addr, sizeof(term_meta.end_addr), 1, out_file.get());
-        fwrite(&term_meta.doc_count, sizeof(term_meta.doc_count), 1, out_file.get());
-        fwrite(&term_meta.file_index, sizeof(term_meta.file_index), 1, out_file.get());
+        out_file.fwrite(&term_meta.term_ub, sizeof(term_meta.term_ub), 1);
+        out_file.fwrite(&term_meta.end_addr, sizeof(term_meta.end_addr), 1);
+        out_file.fwrite(&term_meta.doc_count, sizeof(term_meta.doc_count), 1);
+        out_file.fwrite(&term_meta.file_index, sizeof(term_meta.file_index), 1);
 
         unsigned int block_count = term_meta.block_meta_list.size();
-        fwrite(&block_count, sizeof(block_count), 1, out_file.get());
+        out_file.fwrite(&block_count, sizeof(block_count), 1);
 
         unsigned char vbe_buffer[BUFFER_LIMIT];
         unsigned long long prev_start_doc_id = 0;
@@ -349,9 +352,9 @@ void write_block_meta_file(
             prev_start_doc_id = block.doc_id;
 
             int encode_length = vbe_encode(delta, vbe_buffer);
-            fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
-            fwrite(&block.start_addr, sizeof(block.start_addr), 1, out_file.get());
-            fwrite(&block.block_ub, sizeof(block.block_ub), 1, out_file.get());
+            out_file.fwrite(vbe_buffer, sizeof(unsigned char), encode_length);
+            out_file.fwrite(&block.start_addr, sizeof(block.start_addr), 1);
+            out_file.fwrite(&block.block_ub, sizeof(block.block_ub), 1);
         }
     }
 }
@@ -529,9 +532,10 @@ void merge_inverted_blocks(
     size_t cur_disk_usage = 0;
     unsigned int file_index = 0;
 
-    SafeFile out_file(
+    std::optional<BufferedWriter> out_file;
+    out_file.emplace(
         (out_dir / file_names::posting_file_name(file_index)),
-        "wb"
+        BUF_SIZE
     );
 
     while (!string_heap.empty()) {
@@ -548,7 +552,7 @@ void merge_inverted_blocks(
             valid_streams,
             streams,
             doc_len_list,
-            out_file,
+            *out_file,
             file_index,
             term_meta_mapping,
             block_size,
@@ -570,9 +574,9 @@ void merge_inverted_blocks(
         if (cur_disk_usage && cur_disk_usage + disk_required > split_size) {
             ++file_index;
             cur_disk_usage = 0;
-            out_file = SafeFile(
+            out_file.emplace(
                 (out_dir / file_names::posting_file_name(file_index)),
-                "wb"
+                BUF_SIZE
             );
         }
 

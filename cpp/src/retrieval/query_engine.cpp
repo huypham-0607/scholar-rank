@@ -150,7 +150,7 @@ void PostingPointer::next_shallow_deep(const unsigned long long target_doc_id) {
     if (new_block < cur_block_id) {
         throw std::runtime_error(std::format(
             "Unable to advance PostingPointer: new_block id {} is less than cur_block id {}.",
-            new_block, deep_block_id
+            new_block, cur_block_id
         ));
     }
 

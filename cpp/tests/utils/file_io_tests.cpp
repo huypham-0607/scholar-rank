@@ -290,6 +290,177 @@ namespace SafeFileMmapTest {
     }
 }
 
+namespace BufferedWriterTest {
+    class BufferedWriterTest : public testing::Test {
+    protected:
+
+        void SetUp() override {
+            tmp_path = makeUniqueTempDir();
+        }
+
+        void TearDown() override {
+            fs::remove_all(tmp_path);
+        }
+
+        fs::path tmp_path;
+
+        std::vector<unsigned char> read_all_bytes(const fs::path& path) {
+            std::ifstream in(path, std::ios::binary);
+            return std::vector<unsigned char>(
+                std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()
+            );
+        }
+    };
+
+    TEST_F(BufferedWriterTest, WritesSmallPayloadAndReadsBackAfterDestruction) {
+        fs::path file_name = tmp_path / "small.bin";
+        std::string payload = "hello buffered writer";
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            ASSERT_NO_THROW(writer.fwrite(payload.data(), sizeof(char), payload.size()));
+        }
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes.size(), payload.size());
+        for (size_t i = 0; i < payload.size(); i++) {
+            EXPECT_EQ(bytes[i], (unsigned char)payload[i]);
+        }
+    }
+
+    TEST_F(BufferedWriterTest, DoesNotPhysicallyWriteUntilBufferFillsOrDestructs) {
+        fs::path file_name = tmp_path / "deferred.bin";
+        BufferedWriter writer(file_name, MIN_BUF_SIZE);
+
+        std::vector<unsigned char> small_chunk(100, (unsigned char)'a');
+        writer.fwrite(small_chunk.data(), 1, small_chunk.size());
+
+        // Well under buffer capacity - nothing should have hit disk yet.
+        ASSERT_EQ(fs::file_size(file_name), 0u);
+    }
+
+    TEST_F(BufferedWriterTest, WriteExactlyFillingBufferDoesNotOverflowOrFlushEarly) {
+        fs::path file_name = tmp_path / "exact_fill.bin";
+        std::vector<unsigned char> data(MIN_BUF_SIZE);
+        for (size_t i = 0; i < data.size(); i++) data[i] = (unsigned char)(i % 256);
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            ASSERT_NO_THROW(writer.fwrite(data.data(), 1, data.size()));
+            // Filling to exactly capacity must not trigger a flush yet -
+            // the boundary check is strictly '>', not '>='.
+            ASSERT_EQ(fs::file_size(file_name), 0u);
+        } // destructor flushes here
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes, data);
+    }
+
+    TEST_F(BufferedWriterTest, WriteExceedingBufferCapacityFlushesAndContinuesCorrectly) {
+        fs::path file_name = tmp_path / "overflow.bin";
+        size_t total = MIN_BUF_SIZE + 12345; // forces an internal flush mid-call
+        std::vector<unsigned char> data(total);
+        for (size_t i = 0; i < data.size(); i++) data[i] = (unsigned char)(i % 256);
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            ASSERT_NO_THROW(writer.fwrite(data.data(), 1, data.size()));
+        }
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes, data);
+    }
+
+    TEST_F(BufferedWriterTest, ManySeparateSmallWritesAccumulateAcrossMultipleFlushesCorrectly) {
+        fs::path file_name = tmp_path / "many_small.bin";
+        // Enough individual 1-byte fwrite() calls to force at least two
+        // internal flushes, one buffer-full-worth apart.
+        size_t iterations = (2 * MIN_BUF_SIZE) + 777;
+        std::vector<unsigned char> expected;
+        expected.reserve(iterations);
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            for (size_t i = 0; i < iterations; i++) {
+                unsigned char b = (unsigned char)(i % 256);
+                writer.fwrite(&b, 1, 1);
+                expected.push_back(b);
+            }
+        }
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes, expected);
+    }
+
+    TEST_F(BufferedWriterTest, SingleCallWithLargeCountForcingMidCallFlushPreservesOrder) {
+        fs::path file_name = tmp_path / "midcall_flush.bin";
+        // count large enough that the internal per-element loop must flush
+        // at least twice within this one fwrite() call.
+        size_t count = (MIN_BUF_SIZE * 2) + 500;
+        std::vector<unsigned char> data(count);
+        for (size_t i = 0; i < count; i++) data[i] = (unsigned char)(i % 256);
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            ASSERT_NO_THROW(writer.fwrite(data.data(), 1, count));
+        }
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes, data);
+    }
+
+    TEST_F(BufferedWriterTest, TellReflectsBufferedBytesBeforeAnyFlush) {
+        fs::path file_name = tmp_path / "tell_pre_flush.bin";
+        BufferedWriter writer(file_name, MIN_BUF_SIZE);
+
+        std::vector<unsigned char> chunk(500, (unsigned char)'x');
+        writer.fwrite(chunk.data(), 1, chunk.size());
+
+        // Nothing flushed to the real file yet, but tell() must still report
+        // the logical position as if it had been.
+        EXPECT_EQ(writer.ftell(), 500);
+        EXPECT_EQ(fs::file_size(file_name), 0u);
+    }
+
+    TEST_F(BufferedWriterTest, TellReflectsPositionAcrossAFlushBoundary) {
+        fs::path file_name = tmp_path / "tell_post_flush.bin";
+        BufferedWriter writer(file_name, MIN_BUF_SIZE);
+
+        std::vector<unsigned char> filler(MIN_BUF_SIZE, (unsigned char)'a');
+        writer.fwrite(filler.data(), 1, filler.size());
+        ASSERT_EQ(writer.ftell(), (long)MIN_BUF_SIZE);
+
+        // One more byte forces the pending buffer to actually flush.
+        unsigned char one_more = 'b';
+        writer.fwrite(&one_more, 1, 1);
+        EXPECT_EQ(writer.ftell(), (long)MIN_BUF_SIZE + 1);
+        EXPECT_EQ(fs::file_size(file_name), MIN_BUF_SIZE);
+    }
+
+    TEST_F(BufferedWriterTest, DestructorFlushesPendingUnwrittenBuffer) {
+        fs::path file_name = tmp_path / "dtor_flush.bin";
+        std::string payload = "flushed only by the destructor";
+
+        {
+            BufferedWriter writer(file_name, MIN_BUF_SIZE);
+            writer.fwrite(payload.data(), 1, payload.size());
+            // Well under buffer capacity - nothing should be on disk yet.
+            ASSERT_EQ(fs::file_size(file_name), 0u);
+        } // destructor runs here; a leaked/unflushed buffer would fail the read below
+
+        auto bytes = read_all_bytes(file_name);
+        ASSERT_EQ(bytes.size(), payload.size());
+        for (size_t i = 0; i < payload.size(); i++) {
+            EXPECT_EQ(bytes[i], (unsigned char)payload[i]);
+        }
+    }
+
+    TEST_F(BufferedWriterTest, ThrowsOnBufferSizeBelowMinimum) {
+        fs::path file_name = tmp_path / "too_small.bin";
+        ASSERT_THROW(BufferedWriter writer(file_name, MIN_BUF_SIZE - 1), std::runtime_error);
+    }
+}
+
 class GlobFilesTest : public testing::Test {
 protected:
 

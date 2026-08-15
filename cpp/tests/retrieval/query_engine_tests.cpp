@@ -150,7 +150,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         EXPECT_EQ(pp.get_doc_id(), 0u);
-        EXPECT_EQ(pp.get_block_id(), 0u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 0u);
         EXPECT_EQ(pp.get_doc_count(), 5u);
         EXPECT_EQ(pp.get_block_count(), 3u);
         EXPECT_FLOAT_EQ(pp.get_term_upper_bound(), 0.9f);
@@ -200,7 +200,7 @@ namespace PostingPointerTest {
         PostingPointer pp = makeAlpha();
         EXPECT_EQ(pp.get_next_block_doc_id(), 5u);
         pp.next_shallow(10);
-        EXPECT_EQ(pp.get_block_id(), 2u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 2u);
         EXPECT_EQ(pp.get_next_block_doc_id(), MAX_DOC_ID) << "no block after the last one";
     }
 
@@ -254,7 +254,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next_shallow(1); // block1 starts at 5, 1 doesn't cross it
-        EXPECT_EQ(pp.get_block_id(), 0u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 0u);
         EXPECT_EQ(pp.get_doc_id(), 0u) << "shallow move must not touch doc_id/cur_addr within a block";
     }
 
@@ -262,23 +262,27 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next_shallow(5); // exactly block1's start
-        EXPECT_EQ(pp.get_block_id(), 1u);
-        EXPECT_EQ(pp.get_doc_id(), 5u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 1u);
+        // next_shallow only moves the shallow (block-index) pointer - it
+        // never touches the real/deep doc_id, so this stays at its
+        // constructor value until a real next() call decodes forward.
+        EXPECT_EQ(pp.get_doc_id(), 0u);
     }
 
     TEST_F(PostingPointerTest, NextShallowSkipsMultipleBlocksInOneCall) {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next_shallow(10); // block2's start - skips block1 entirely
-        EXPECT_EQ(pp.get_block_id(), 2u);
-        EXPECT_EQ(pp.get_doc_id(), 10u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 2u);
+        // Same as above: shallow-only move, real doc_id is untouched.
+        EXPECT_EQ(pp.get_doc_id(), 0u);
     }
 
     TEST_F(PostingPointerTest, NextShallowThrowsOnBackwardMove) {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next_shallow(10); // move forward to block2 first
-        ASSERT_EQ(pp.get_block_id(), 2u);
+        ASSERT_EQ(pp.get_shallow_block_id(), 2u);
         ASSERT_THROW(pp.next_shallow(3), std::runtime_error) << "moving to an earlier block should never happen in BMW usage";
     }
 
@@ -288,7 +292,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next(1);
-        EXPECT_EQ(pp.get_block_id(), 0u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 0u);
         EXPECT_EQ(pp.get_doc_id(), 1u);
         EXPECT_EQ(pp.get_frequency(), 1u);
     }
@@ -305,7 +309,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next(5); // block1 starts exactly here - no scanning needed after the switch
-        EXPECT_EQ(pp.get_block_id(), 1u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 1u);
         EXPECT_EQ(pp.get_doc_id(), 5u);
         EXPECT_EQ(pp.get_frequency(), 2u);
     }
@@ -314,7 +318,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next(6); // must switch to block1, then advance one more entry inside it
-        EXPECT_EQ(pp.get_block_id(), 1u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 1u);
         EXPECT_EQ(pp.get_doc_id(), 6u);
         EXPECT_EQ(pp.get_frequency(), 1u);
     }
@@ -323,7 +327,7 @@ namespace PostingPointerTest {
         setupAlpha();
         PostingPointer pp = makeAlpha();
         pp.next(7); // no doc in block1 satisfies >=7; must roll into block2
-        EXPECT_EQ(pp.get_block_id(), 2u);
+        EXPECT_EQ(pp.get_shallow_block_id(), 2u);
         EXPECT_EQ(pp.get_doc_id(), 10u);
         EXPECT_EQ(pp.get_frequency(), 3u);
     }
@@ -619,12 +623,16 @@ namespace QueryHelpersTest {
     TEST_F(QueryHelpersTest, GetNewCandidateReturnsRealNextBlockStartWhenAvailable) {
         setupCorpus();
         auto postings = makeSortedPostings();
-        // pivot=1 -> doc=0 -> candidates t1 (still on block0, next block
-        // starts at doc4) and t2 (single/last block -> MAX_DOC_ID).
-        // min(4, MAX_DOC_ID) = 4 - regression guard: this must NOT come back
-        // as MAX_DOC_ID just because a fallback default happens to be that.
+        // pivot=1 -> doc=0 -> prefix candidates t1 (still on block0, next
+        // block starts at doc4) and t2 (single/last block -> MAX_DOC_ID),
+        // giving min(4, MAX_DOC_ID) = 4. But get_new_candidate also checks
+        // the first posting past the prefix (t3, real doc_id=2, not yet
+        // shallow-advanced) as a possible nearer target, and 2 < 4 - so the
+        // real answer is 2, not 4. Regression guard: this must NOT come
+        // back as MAX_DOC_ID just because a fallback default happens to be
+        // that.
         unsigned long long target = get_new_candidate(postings, 1);
-        EXPECT_EQ(target, 4u);
+        EXPECT_EQ(target, 2u);
     }
 
     TEST_F(QueryHelpersTest, GetNewCandidateReturnsMaxDocIdWhenEveryCandidateIsOnItsLastBlock) {

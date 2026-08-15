@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <cstring>
 
 namespace fs = std::filesystem;
 
@@ -94,6 +95,45 @@ bool SafeFile::fwrite(void* const buffer, const std::size_t size, const std::siz
     return true;
 }
 
+BufferedWriter::BufferedWriter(const fs::path& _path, const size_t _buf_size) 
+    : file(SafeFile(_path, "wb")), buffer(std::vector<unsigned char>(_buf_size)), ptr(0) {
+        if (_buf_size < MIN_BUF_SIZE) throw std::runtime_error(std::format(
+            "Failed to initialize BufferedWriter: _buf_size {} is too small (min. {}).",
+            _buf_size, MIN_BUF_SIZE
+        ));
+    }
+
+
+void BufferedWriter::flush() {
+    file.fwrite(buffer.data(), sizeof(unsigned char), ptr);
+    ptr = 0;
+}
+
+void BufferedWriter::fwrite(const void* const source, const std::size_t size, const std::size_t count) {
+    for (size_t i = 0; i < count; i++){
+        if (ptr + size > buffer.size()) {
+            flush();
+        }
+        
+        // Only transmittable from same architecture machine
+        std::memcpy(buffer.data() + ptr, (unsigned char*)source + i * size, size);
+        ptr += size;
+    }
+}
+
+BufferedWriter::~BufferedWriter() {
+    try {
+        flush();
+    } catch (const std::runtime_error&) {
+        // Maybe should log something if fclose fail.
+    }
+}
+
+const long BufferedWriter::ftell() {
+    long tmp = std::ftell(file.get());
+    if (tmp == -1L) return tmp;
+    return tmp + ptr;
+}
 
 SafeFileMmap::SafeFileMmap(fs::path _file_path) :file_path(_file_path) {
     int fd = open(file_path.string().c_str(), O_RDONLY, S_IRUSR | S_IWUSR);

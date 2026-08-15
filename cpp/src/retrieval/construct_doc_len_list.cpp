@@ -1,6 +1,7 @@
 #include "scholar_rank/retrieval/construct_doc_len_list.h"
 #include "scholar_rank/retrieval/file_names.h"
 #include "scholar_rank/retrieval/token_stream.h"
+#include "scholar_rank/utils/file_io.h"
 #include "scholar_rank/utils/vbe.h"
 #include "scholar_rank/utils/logger.h"
 
@@ -11,22 +12,17 @@
 
 namespace fs = std::filesystem;
 
+constexpr size_t BUF_SIZE = (1<<20);
+
 void write_doc_len_entry(
-    const SafeFile& out_fp,
+    BufferedWriter& out_fp,
     const unsigned long long& delta,
     const unsigned int& freq
 ) {
     unsigned char buffer[8];
     size_t encode_len = vbe_encode(delta, buffer);
-    size_t arg_count;
-    arg_count = fwrite(buffer, sizeof(unsigned char), encode_len, out_fp.get());
-    if (arg_count != encode_len) throw std::runtime_error(std::format(
-        "Error while writing doc_len entry."
-    ));
-    arg_count = fwrite(&freq, sizeof(freq), 1, out_fp.get());
-    if (arg_count != 1) throw std::runtime_error(std::format(
-        "Error while writing doc_len entry."
-    ));
+    out_fp.fwrite(buffer, sizeof(unsigned char), encode_len);
+    out_fp.fwrite(&freq, sizeof(freq), 1);
 }
 
 void construct_doc_len_list(
@@ -39,7 +35,7 @@ void construct_doc_len_list(
 
     fs::path out_file_path = out_dir / file_names::DOC_LEN_LIST;
 
-    SafeFile out_fp(out_file_path, "wb");
+    BufferedWriter out_fp(out_file_path, BUF_SIZE);
 
     logger.log("Started constructing document length list.");
 

@@ -48,7 +48,7 @@ namespace WriteDocLenEntryTest {
         fs::path file_name = tmp_path / "doc_len_entry.bin";
 
         {
-            SafeFile out_fp(file_name, "wb");
+            BufferedWriter out_fp(file_name, MIN_BUF_SIZE);
             ASSERT_NO_THROW(write_doc_len_entry(out_fp, 300, 42));
         }
 
@@ -72,7 +72,7 @@ namespace WriteDocLenEntryTest {
         };
 
         {
-            SafeFile out_fp(file_name, "wb");
+            BufferedWriter out_fp(file_name, MIN_BUF_SIZE);
             for (const auto& [delta, freq] : entries) {
                 ASSERT_NO_THROW(write_doc_len_entry(out_fp, delta, freq));
             }

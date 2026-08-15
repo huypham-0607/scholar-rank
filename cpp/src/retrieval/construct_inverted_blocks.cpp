@@ -15,6 +15,8 @@ namespace fs = std::filesystem;
 
 constexpr unsigned int EST_UMAP_MEM_PER_ENTRY = 48; // Safe estimation of std::unordered_map mem usage per entry
 
+constexpr size_t BUF_SIZE = (1<<20);
+
 bool build_partial_index(
     const SafeFile& token_stream,
     const size_t mem_limit,
@@ -64,20 +66,20 @@ void write_partial_index(
     std::unordered_map<std::string, PostingList>& posting_list_mapping,
     std::vector<std::string>& dictionary
 ) {
-    SafeFile out_file(out_file_path, "wb");
+    BufferedWriter out_file(out_file_path, BUF_SIZE);
 
     unsigned int dictionary_size = dictionary.size();
-    fwrite(&dictionary_size, sizeof(dictionary_size), 1, out_file.get());
+    out_file.fwrite(&dictionary_size, sizeof(dictionary_size), 1);
 
     unsigned char vbe_buffer[8];
     for (std::string term : dictionary) {
         unsigned short term_size = term.size();                                 // 2 bytes
         unsigned int posting_list_size = posting_list_mapping[term].size();     // 4 bytes should be sufficient
 
-        fwrite(&term_size, sizeof(term_size), 1, out_file.get());
-        fwrite(&posting_list_size, sizeof(posting_list_size), 1, out_file.get());
+        out_file.fwrite(&term_size, sizeof(term_size), 1);
+        out_file.fwrite(&posting_list_size, sizeof(posting_list_size), 1);
 
-        fwrite(term.c_str(), sizeof(char), term.size(), out_file.get());
+        out_file.fwrite(term.c_str(), sizeof(char), term.size());
 
         // VBE encoding
         unsigned long long last = 0;
@@ -86,8 +88,8 @@ void write_partial_index(
             unsigned long long delta = item.doc_id - last;
             int encode_length = vbe_encode(delta, vbe_buffer);
 
-            fwrite(vbe_buffer, sizeof(unsigned char), encode_length, out_file.get());
-            fwrite(&item.freq, sizeof(item.freq), 1, out_file.get());
+            out_file.fwrite(vbe_buffer, sizeof(unsigned char), encode_length);
+            out_file.fwrite(&item.freq, sizeof(item.freq), 1);
             last = item.doc_id;
         }
     }
