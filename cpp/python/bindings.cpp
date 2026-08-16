@@ -58,8 +58,26 @@ PYBIND11_MODULE(scholar_rank_cpp, m) {
         py::arg("meta_path"), py::arg("terms"), py::arg("k"),
         "Run multiple BMW/WAND queries against one index load. terms and k "
         "must be the same length - terms[i]/k[i] are paired per query. "
-        "Returns (results, elapsed): both lists are in the same order as "
-        "terms, each elapsed entry covering only that query's own execution "
-        "time, not the shared index load."
+        "Returns results in the same order as terms. Use "
+        "query_batch_benchmark instead if per-query/index-load timing is "
+        "needed."
+    );
+
+    m.def(
+        "query_batch_benchmark",
+        &query_batch_benchmark,
+        py::arg("meta_path"), py::arg("terms"), py::arg("k"),
+        "Like query_batch, but also times QueryEngine construction (index "
+        "load) separately from each query's own execution. Returns "
+        "(results, (index_load_elapsed, query_elapsed)): results and "
+        "query_elapsed are in the same order as terms, index_load_elapsed "
+        "is a single duration covering metadata/doc_len_list/term_meta load."
+    );
+
+    m.def(
+        "read_term_df_mapping",
+        &read_term_df_mapping,
+        py::arg("meta_path"),
+        "Return a vector of (term, df) mapping."
     );
 }

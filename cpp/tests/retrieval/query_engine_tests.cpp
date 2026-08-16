@@ -886,7 +886,7 @@ namespace QueryEndToEndTest {
         auto [dog_res, dog_elapsed] = query(meta_path, {"dog"}, 3);
         auto [bird_res, bird_elapsed] = query(meta_path, {"bird"}, 3);
 
-        auto [batch_res, batch_elapsed] = query_batch(
+        auto batch_res = query_batch(
             meta_path, {{"cat"}, {"dog"}, {"bird"}}, {3, 3, 3}
         );
 
@@ -899,7 +899,7 @@ namespace QueryEndToEndTest {
             << "query_batch result 2 should match an individual query('bird') call";
     }
 
-    TEST_F(QueryEndToEndTest, QueryBatchReturnsOneElapsedEntryPerQuery) {
+    TEST_F(QueryEndToEndTest, QueryBatchBenchmarkReturnsOneElapsedEntryPerQuery) {
         write_doc_len_list({{0,3},{1,2},{2,4},{3,1},{4,2}});
         write_raw_block_multi(file_names::partial_block_file_name(0), {
             {"cat", {{0,1},{2,2},{4,1}}},
@@ -907,10 +907,11 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto [batch_res, batch_elapsed] = query_batch(
+        auto [batch_res, timing] = query_batch_benchmark(
             meta_path, {{"cat"}, {"dog"}}, {2, 2}
         );
-        EXPECT_EQ(batch_elapsed.size(), 2u)
+        auto& [index_load_elapsed, query_elapsed] = timing;
+        EXPECT_EQ(query_elapsed.size(), 2u)
             << "one elapsed duration must be reported per query, not one for the whole batch";
     }
 
@@ -921,7 +922,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto [batch_res, batch_elapsed] = query_batch(
+        auto batch_res = query_batch(
             meta_path, {{"cat"}, {"nonexistent_term"}, {}}, {3, 3, 3}
         );
         ASSERT_EQ(batch_res.size(), 3u);
@@ -937,7 +938,7 @@ namespace QueryEndToEndTest {
         });
         fs::path meta_path = build_index();
 
-        auto [batch_res, batch_elapsed] = query_batch(
+        auto batch_res = query_batch(
             meta_path, {{"cat"}, {"cat"}}, {1, 2}
         );
         ASSERT_EQ(batch_res.size(), 2u);

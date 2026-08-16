@@ -34,3 +34,8 @@ def load_config() -> dict:
 
     with open(CONFIG_PATH, "rb") as f:
         return tomllib.load(f)
+
+def load_benchmark_config() -> dict:
+    config_path = PROJECT_ROOT / "python" / "benchmark" / "benchmark-config.toml"
+    with open(config_path, "rb") as f:
+        return tomllib.load(f)

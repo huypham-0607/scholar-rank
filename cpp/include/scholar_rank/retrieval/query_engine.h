@@ -95,8 +95,15 @@ std::pair<std::vector<std::pair<float, unsigned long long>>, std::chrono::durati
     const int k
 );
 
-std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>, 
-        std::vector<std::chrono::duration<double, std::milli>>> query_batch(
+std::vector<std::vector<std::pair<float, unsigned long long>>> query_batch(
+    const fs::path meta_path,
+    const std::vector<std::vector<std::string>> raw_terms,
+    const std::vector<int> k
+);
+
+std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>,
+        std::pair<std::chrono::duration<double, std::milli>, std::vector<std::chrono::duration<double, std::milli>>>>
+        query_batch_benchmark(
     const fs::path meta_path,
     const std::vector<std::vector<std::string>> raw_terms,
     const std::vector<int> k

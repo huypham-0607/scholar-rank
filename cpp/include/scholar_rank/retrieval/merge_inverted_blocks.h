@@ -135,4 +135,12 @@ void read_metadata(
     size_t& split_size
 );
 
+/**
+ * @brief Read block metadata and return list list of term - df pair.
+ * 
+ */
+std::vector<std::pair<std::string, unsigned int>> read_term_df_mapping(
+    const std::filesystem::path& in_path
+);
+
 #endif

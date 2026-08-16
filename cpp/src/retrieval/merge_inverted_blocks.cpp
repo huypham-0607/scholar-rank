@@ -616,3 +616,25 @@ void merge_inverted_blocks(
 
     logger.log("Finished writing metadata.");
 }
+
+std::vector<std::pair<std::string, unsigned int>> read_term_df_mapping (
+    const fs::path& meta_path
+) {
+    fs::path in_path, doc_len_path, doc_len_meta_path;
+    float k1, b;
+    int block_size;
+    size_t split_size;
+    read_metadata(meta_path, in_path, doc_len_path, doc_len_meta_path, k1, b, block_size, split_size);
+
+    // Load term_meta_mapping
+    std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping;
+    raw_term_meta_mapping = read_block_meta_file(
+        in_path / file_names::BLOCK_META
+    );
+
+    std::vector<std::pair<std::string, unsigned int>> results;
+    for (size_t i = 0; i < raw_term_meta_mapping.size(); i++) {
+        results.push_back(std::make_pair(raw_term_meta_mapping[i].first, raw_term_meta_mapping[i].second.doc_count));
+    }
+    return results;
+}

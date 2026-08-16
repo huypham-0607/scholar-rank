@@ -23,6 +23,7 @@ class Tokenizer:
         self
     ):
         self.stop_word_list = r"\b(i|me|my|myself|we|our|ours|ourselves|you|your|yours|yourself|yourselves|he|him|his|himself|she|her|hers|herself|it|its|itself|they|them|their|theirs|themselves|what|which|who|whom|this|that|these|those|am|is|are|was|were|be|been|being|have|has|had|having|do|does|did|doing|a|an|the|and|but|if|or|because|as|until|while|of|at|by|for|with|about|against|between|into|through|during|before|after|above|below|to|from|up|down|in|out|on|off|over|under|again|further|then|once|here|there|when|where|why|how|all|any|both|each|few|more|most|other|some|such|no|nor|not|only|own|same|so|than|too|very|s|t|can|will|just|don|should|now)\b"
+        self.con = db.connect()
 
     def read_doc_id_lookup(
         self,
@@ -45,13 +46,11 @@ class Tokenizer:
         dtype = np.dtype([("raw_id", "<i8"), ("mapped_id", "<i4")])
         df = pd.DataFrame(np.fromfile(lookup_path, dtype=dtype))
 
-        con = db.connect()
-        doc_id_map = con.sql("SELECT raw_id, mapped_id FROM df")
+        doc_id_map = self.con.sql("SELECT raw_id, mapped_id FROM df")
         return doc_id_map
 
     def build_doc_id_lookup(
         self,
-        con,
         db_path: Path,
         lookup_out_path: Path,
         lookup_file_name: str,
@@ -67,7 +66,7 @@ class Tokenizer:
         """
         logger.info(f"Building doc_id lookup table from {db_path}.")
 
-        doc_id_map = con.sql(f"""
+        doc_id_map = self.con.sql(f"""
             SELECT
                 id AS raw_id,
                 (ROW_NUMBER() OVER (ORDER BY id ASC) - 1)::INTEGER AS mapped_id
@@ -107,13 +106,13 @@ class Tokenizer:
         row_per_chunk: int = (1<<18),
         chunk_per_file: int = (1<<8)
     ):
-        con = db.connect(config={"temp_directory": str(spill_path)})
+        self.con = db.connect(config={"temp_directory": str(spill_path)})
 
         logger.info(f"Start serializing corpus from {db_path}.")
 
-        doc_id_map = self.build_doc_id_lookup(con, db_path, lookup_out_path, lookup_file_name, row_per_chunk)
+        doc_id_map = self.build_doc_id_lookup(db_path, lookup_out_path, lookup_file_name, row_per_chunk)
 
-        tokenized = con.sql(f"""
+        tokenized = self.con.sql(f"""
             INSTALL fts;
             LOAD fts;
             SELECT
@@ -143,12 +142,12 @@ class Tokenizer:
 
         logger.info(f"Creating _token_stream table...")
 
-        rel = con.sql(""" SELECT id, tokens FROM tokenized ORDER BY id ASC """)
-        con.sql(""" CREATE OR REPLACE TEMP TABLE _token_stream AS SELECT id, unnest(tokens) AS token FROM rel """)
+        rel = self.con.sql(""" SELECT id, tokens FROM tokenized ORDER BY id ASC """)
+        self.con.sql(""" CREATE OR REPLACE TEMP TABLE _token_stream AS SELECT id, unnest(tokens) AS token FROM rel """)
 
         logger.info(f"Finished creating _token_stream table.")
 
-        token_stream = con.sql("SELECT id, token FROM _token_stream")
+        token_stream = self.con.sql("SELECT id, token FROM _token_stream")
 
         buf = io.BytesIO()
 
@@ -191,9 +190,7 @@ class Tokenizer:
         logger.info(f"Max token length = {max_token_length}")
 
     def tokenize_query(self, query: str) -> list[str]:
-        con = db.connect()
-
-        res = con.sql(f"""
+        res = self.con.sql(f"""
             SELECT list_transform(
                 regexp_extract_all(
                     regexp_replace(lower($query), '{self.stop_word_list}', ' ', 'g'),

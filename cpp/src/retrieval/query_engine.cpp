@@ -444,6 +444,14 @@ public:
 
         for (const auto& [term,metadata] : raw_term_meta_mapping) {
             term_meta_mapping.emplace(std::move(term), std::move(metadata));
+            
+            unsigned int file_index = metadata.file_index;
+            if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
+                file_index_mapping.emplace(
+                    file_index,
+                    in_path / file_names::posting_file_name(file_index)
+                );
+            }
         }
         logger.log("Finished loading term_meta_mapping. QueryEngine ready.");
     }
@@ -457,16 +465,6 @@ public:
         for (const auto& term : raw_terms) {
             if (term_meta_mapping.find(term) != term_meta_mapping.end()) {
                 terms.push_back(term);
-            }
-        }
-
-        for (const auto& term : terms) {
-            unsigned int file_index = term_meta_mapping[term].file_index;
-            if (file_index_mapping.find(file_index) == file_index_mapping.end()) {
-                file_index_mapping.emplace(
-                    file_index,
-                    in_path / file_names::posting_file_name(file_index)
-                );
             }
         }
 
@@ -570,14 +568,40 @@ std::pair<std::vector<std::pair<float, unsigned long long>>, std::chrono::durati
     return std::make_pair(result,elapsed);
 }
 
-std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>, 
-        std::vector<std::chrono::duration<double, std::milli>>> query_batch (
+std::vector<std::vector<std::pair<float, unsigned long long>>> query_batch (
     const fs::path meta_path,
     const std::vector<std::vector<std::string>> raw_terms,
     const std::vector<int> k
 ) {
     Logger logger(__FILE_NAME__, Logger::INFO);
     QueryEngine engine(meta_path, logger);
+
+    std::vector<std::vector<std::pair<float, unsigned long long>>> results;
+    for (size_t i = 0; i < raw_terms.size(); i++) {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        results.push_back(engine.query(raw_terms[i], k[i]));
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        logger.log(std::format("Finished query {}. Time elapsed: {}", i+1, elapsed));
+    }
+
+    return results;
+}
+
+std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>, 
+        std::pair<std::chrono::duration<double, std::milli>, std::vector<std::chrono::duration<double, std::milli>>>>
+        query_batch_benchmark (
+    const fs::path meta_path,
+    const std::vector<std::vector<std::string>> raw_terms,
+    const std::vector<int> k
+) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
+    auto start_engine = std::chrono::high_resolution_clock::now();
+    QueryEngine engine(meta_path, logger);
+    auto end_engine = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed_engine = end_engine - start_engine;
 
     std::vector<std::vector<std::pair<float, unsigned long long>>> results;
     std::vector<std::chrono::duration<double, std::milli>> benchmarks;
@@ -592,5 +616,5 @@ std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>,
         benchmarks.push_back(elapsed);
     }
 
-    return std::make_pair(results, benchmarks);
+    return std::make_pair(results, std::make_pair(elapsed_engine, benchmarks));
 }
