@@ -3,6 +3,6 @@ benchmark-dir = "/data/scholar_rank/benchmark"
 spill-dir = "/data/scholar_rank/benchmark/spill"
 
 [msmarco]
-data-dir = "/data/msmarco"
+data-dir = "/data/scholar_rank/benchmark/data/msmarco"
 posting-dir = "/data/scholar_rank/benchmark/msmarco"
 

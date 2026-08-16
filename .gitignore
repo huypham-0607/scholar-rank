@@ -17,8 +17,10 @@ __pycache__/
 Logs/
 .cph/
 
+
 # x3 nuzzles pounces on u UwU u so warm
 CLAUDE.md
+.claude/
 initialization.md
 
 # Duckdb Cache

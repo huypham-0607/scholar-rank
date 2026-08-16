@@ -4,15 +4,17 @@ import duckdb as db
 import numpy as np
 import pandas as pd
 import tomllib
+import csv
 
 from pathlib import Path
-from scholar_rank import get_logger, load_config, scholar_rank_cpp, PROJECT_ROOT
+from scholar_rank import get_logger, load_config, Tokenizer, scholar_rank_cpp, PROJECT_ROOT
 
 logger = get_logger(__name__)
 
 TOKEN_STREAM_FOLDER = "token_stream"
 POSTING_FOLDER = "posting"
 PARTIAL_FOLDER = "posting/partial"
+QUERY_RESULT_FOLDER = "query_result"
 
 MEM_LIMIT = (1<<30)
 K1 = 0.82
@@ -144,6 +146,38 @@ def build_posting(
         SPLIT_SIZE
     )
 
+def run_queries(data_path: Path, meta_path: Path) -> tuple:
+    with open(data_path, mode='r', encoding='utf-8') as file:
+        queries = list(csv.reader(file, delimiter='\t'))
+
+    tokenizer = Tokenizer()
+
+    query_list = list(tokenizer.tokenize_query(query) for _, query in queries)
+    pid_list = list(pid for pid, _ in queries)
+    k_list = list(1000 for i in range (len(queries)))
+
+    return pid_list, scholar_rank_cpp.query_batch(meta_path, query_list, k_list)
+
+def write_ms(qid_list: list, results: list[list[tuple[float,int]]], out_path: Path):
+    buffer = []
+    for qid, ranked in zip(qid_list, results):
+        for rank, (score, pid) in enumerate(ranked, start=1):
+            buffer.append([qid, pid, rank])
+
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerows(buffer)
+
+def write_trec(qid_list: list, results: list[list[tuple[float,int]]], out_path: Path):
+    buffer = []
+    for qid, ranked in zip(qid_list, results):
+        for rank, (score, pid) in enumerate(ranked, start=1):
+            buffer.append([qid, "Q0", pid, rank, score, "BMW"])
+
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerows(buffer)
+
 
 def main():
     config = load_config()
@@ -153,6 +187,7 @@ def main():
     data_dir = Path(benchmark_config["msmarco"]["data-dir"])
     token_stream_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / TOKEN_STREAM_FOLDER
     spill_dir = Path(benchmark_config["paths"]["spill-dir"])
+    query_result_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / QUERY_RESULT_FOLDER
     posting_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / POSTING_FOLDER
     partial_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / PARTIAL_FOLDER
 
@@ -162,7 +197,7 @@ def main():
     posting_dir.mkdir(parents=True, exist_ok=True)
     partial_dir.mkdir(parents=True, exist_ok=True)
 
-    if (not (posting_dir / "metadata.bin").is_file()):
+    if (not (posting_dir / scholar_rank_cpp.file_names.METADATA_BIN).is_file()):
         build_posting(
             data_dir,
             token_stream_dir,
@@ -170,7 +205,20 @@ def main():
             posting_dir,
             partial_dir
         )
-    
+
+    data_path = data_dir / 'queries.dev.small.tsv'    
+    meta_path = posting_dir / scholar_rank_cpp.file_names.METADATA_BIN
+
+    pid_list, (results, latency) = run_queries(data_path, meta_path)
+
+    ms_path = query_result_dir / "ms_mrr10.tsv"
+    trec_path = query_result_dir / "trec_recall1000.trec"
+
+    ms_path.parent.mkdir(parents=True, exist_ok=True)
+    trec_path.parent.mkdir(parents=True, exist_ok=True)
+
+    write_ms(pid_list, results, ms_path)
+    write_trec(pid_list, results, trec_path)
 
 if __name__ == "__main__":
     main()
