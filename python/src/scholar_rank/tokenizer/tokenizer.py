@@ -106,7 +106,7 @@ class Tokenizer:
         row_per_chunk: int = (1<<18),
         chunk_per_file: int = (1<<8)
     ):
-        self.con = db.connect(config={"temp_directory": str(spill_path)})
+        self.con.execute(f"SET temp_directory = '{spill_path}'")
 
         logger.info(f"Start serializing corpus from {db_path}.")
 

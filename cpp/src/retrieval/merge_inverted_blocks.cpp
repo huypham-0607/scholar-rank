@@ -620,11 +620,15 @@ void merge_inverted_blocks(
 std::vector<std::pair<std::string, unsigned int>> read_term_df_mapping (
     const fs::path& meta_path
 ) {
+    Logger logger(__FILE_NAME__, Logger::INFO);
     fs::path in_path, doc_len_path, doc_len_meta_path;
     float k1, b;
     int block_size;
     size_t split_size;
+
+    logger.log(std::format("Fetching TermMeta from {}.", meta_path.string()));
     read_metadata(meta_path, in_path, doc_len_path, doc_len_meta_path, k1, b, block_size, split_size);
+    logger.log(std::format("Finished fetching TermMeta from {}.", meta_path.string()));
 
     // Load term_meta_mapping
     std::vector<std::pair<std::string, TermMeta>> raw_term_meta_mapping;
@@ -633,8 +637,19 @@ std::vector<std::pair<std::string, unsigned int>> read_term_df_mapping (
     );
 
     std::vector<std::pair<std::string, unsigned int>> results;
-    for (size_t i = 0; i < raw_term_meta_mapping.size(); i++) {
-        results.push_back(std::make_pair(raw_term_meta_mapping[i].first, raw_term_meta_mapping[i].second.doc_count));
+    results.reserve(raw_term_meta_mapping.size());
+    for (const auto& [term, metadata] : raw_term_meta_mapping) {
+        results.emplace_back(std::move(term), metadata.doc_count);
     }
+
+    logger.log(std::format("Sorting (term, df) mapping..."));
+
+    std::sort(results.begin(), results.end(), [&] (
+        const std::pair<std::string, unsigned int>& a, const std::pair<std::string, unsigned int>& b) {
+            return a.second > b.second;
+        }
+    );
+    logger.log(std::format("Finished sorting (term, df) mapping."));
+    
     return results;
 }
