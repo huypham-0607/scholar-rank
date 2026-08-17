@@ -1,6 +1,7 @@
 import csv
 import random
 
+import numpy as np
 import pandas as pd
 
 from pathlib import Path
@@ -13,6 +14,7 @@ QUERY_RESULT_FOLDER = "query_result"
 
 SEED = 67
 N_QUERIES = 2000
+N_WEIGHTED_QUERIES = 5000
 QUERY_LEN_RANGE = (5, 10)
 
 def _percentile_slice(
@@ -91,6 +93,45 @@ def generate_skewed_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
     _write_query_set(pool, out_dir / "skewed_set.tsv")
     logger.info("Finished generating skewed_set.")
 
+def _sample_weighted_distinct(
+    terms: list[str],
+    prefix: np.ndarray,
+    total: int,
+    k: int,
+    rng: np.random.Generator,
+) -> list[str]:
+    """Draw k distinct terms, each with probability proportional to its df."""
+    picked: set[int] = set()
+    while len(picked) < k:
+        needed = k - len(picked)
+        draws = rng.integers(0, total, size=needed)
+        indices = np.searchsorted(prefix, draws, side="right")
+        picked.update(indices.tolist())
+    return [terms[i] for i in picked]
+
+def generate_weighted_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """weighted_set.tsv: each term has a df / sum(df) chance of appearing."""
+    logger.info("Generating weighted_set...")
+
+    terms = [term for term, _ in mapping_sorted]
+    dfs = np.array([df for _, df in mapping_sorted], dtype=np.int64)
+    prefix = np.cumsum(dfs)
+    total = int(prefix[-1])
+
+    np_rng = np.random.default_rng(SEED)
+    py_rng = random.Random(SEED)
+
+    out_path = out_dir / "weighted_set.tsv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, delimiter="\t")
+        for qid in range(N_WEIGHTED_QUERIES):
+            query_len = py_rng.randint(*QUERY_LEN_RANGE)
+            query_terms = _sample_weighted_distinct(terms, prefix, total, query_len, np_rng)
+            writer.writerow([qid, " ".join(query_terms)])
+
+    logger.info("Finished generating weighted_set.")
+
 def main():
     """Produced a few query set for full-en based on term occurences
 
@@ -101,10 +142,11 @@ def main():
 
     List of query sets
         - random_set.tsv: Uniformed random sampling.
-        - common_set.tsv: Random terms with top 10% highest df.
-        - very_common_set.tsv: Random terms with top 0.1% df.
+        - common_set.tsv: Random terms with top 1% highest df.
+        - very_common_set.tsv: Random terms with top 0.01% df.
         - rare_set.tsv: Random terms with bottom 10% lowest df.
-        - skewed_set.tsv: Random terms with top 0.1% highest df or top 0.1% lowest df.
+        - skewed_set.tsv: Random terms with top 0.01% highest df or top 0.01% lowest df.
+        - weighted_set.tsv: Random terms with (df / sum(df)) chance of appearing..
     """
     config = load_config()
     benchmark_config = load_benchmark_config()
@@ -134,6 +176,7 @@ def main():
     generate_very_common_set(mapping_sorted, query_data_dir)
     generate_rare_set(mapping_sorted, query_data_dir)
     generate_skewed_set(mapping_sorted, query_data_dir)
+    generate_weighted_set(mapping_sorted, query_data_dir)
 
 if __name__ == "__main__":
     main()
