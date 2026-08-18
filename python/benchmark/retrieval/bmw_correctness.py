@@ -34,14 +34,26 @@ def write_trec(qid_list: list, results: list[list[tuple[float,int]]], out_path: 
 
 def write_correctness_parquet(
     run_name: str,
-    exact_matches: int,
-    recall_at_1000: int,
+    rank_matches: list[bool],
+    query_matches: int,
+    missing_docids: list[list[int]],
+    extra_docids: list[list[int]],
+    bmw_min_score: list[float],
+    bmw_max_score: list[float],
+    exhaustive_min_score: list[float],
+    exhaustive_max_score: list[float],
     out_path: Path,
 ):
     row = pd.DataFrame([{
         "run_name": run_name,
-        "exact_matches": exact_matches,
-        "recall_at_1000": recall_at_1000,
+        "rank_matches": rank_matches,
+        "query_matches": query_matches,
+        "missing_docids": missing_docids,
+        "extra_docids": extra_docids,
+        "bmw_min_score": bmw_min_score,
+        "bmw_max_score": bmw_max_score,
+        "exhaustive_min_score": exhaustive_min_score,
+        "exhaustive_max_score": exhaustive_max_score,
     }])
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,11 +88,26 @@ def compare_bmw_exhaustive(queryset: str, k: int, x: int) -> tuple:
     """Compare the first x queries of queryset between the pruned BMW engine
     and the unpruned exhaustive engine, both run at the same k.
 
-    exact_matches: no. of the x queries where BMW's full ranked result list
-    (score and doc_id at every position) is identical to exhaustive's.
-    recall_at_1000: total no. of documents present in both BMW's and
-    exhaustive's result sets, summed across the x queries (exhaustive is
-    ground truth here, so this is how many of its documents BMW also found).
+    Returns (rank_matches, query_matches, missing_docids,
+    extra_docids, bmw_min_score, bmw_max_score, exhaustive_min_score,
+    exhaustive_max_score) - all but query_matches are lists with
+    one entry per query:
+      rank_matches: bool - True if BMW's full ranked result list
+        (score and doc_id at every position) is identical to exhaustive's
+        for that query.
+      query_matches: int, sum of rank_matches - how many of
+        the x queries matched exactly.
+      missing_docids: list[int] - doc_ids in exhaustive's result but absent
+        from BMW's. False negatives - the real bug class, since it means
+        BMW's pruning threw away a document it should have kept.
+      extra_docids: list[int] - doc_ids in BMW's result but absent from
+        exhaustive's. Should be impossible given exhaustive is a full,
+        unpruned scan - a non-empty entry here points at a scoring or
+        heap bug rather than an over-aggressive pruning bug.
+      bmw_min_score / bmw_max_score: float or None - min/max score in
+        BMW's result list for that query (None if it returned no results).
+      exhaustive_min_score / exhaustive_max_score: same, for exhaustive's
+        result list.
     """
     benchmark_config = load_benchmark_config()
     query_path = Path(benchmark_config["paths"]["data-dir"]) / "full-en" / queryset
@@ -90,17 +117,37 @@ def compare_bmw_exhaustive(queryset: str, k: int, x: int) -> tuple:
     logger.info(f"Running exhaustive engine on first {x} queries of {queryset}, k = {k}...")
     exhaustive_results, _, _ = full_en_bench_query.run_queries_exhaustive_perf_metrics(query_path, k, cap=x)
 
-    exact_matches = 0
-    recall_at_1000 = 0
+    rank_matches = []
+    missing_docids = []
+    extra_docids = []
+    bmw_min_score = []
+    bmw_max_score = []
+    exhaustive_min_score = []
+    exhaustive_max_score = []
+
     for bmw_res, exhaustive_res in zip(bmw_results, exhaustive_results):
-        if bmw_res == exhaustive_res:
-            exact_matches += 1
+        rank_matches.append(bmw_res == exhaustive_res)
 
         bmw_docs = {doc_id for _, doc_id in bmw_res}
         exhaustive_docs = {doc_id for _, doc_id in exhaustive_res}
-        recall_at_1000 += len(bmw_docs & exhaustive_docs)
+        missing_docids.append(list(exhaustive_docs - bmw_docs))
+        extra_docids.append(list(bmw_docs - exhaustive_docs))
 
-    return exact_matches, recall_at_1000
+        bmw_scores = [score for score, _ in bmw_res]
+        exhaustive_scores = [score for score, _ in exhaustive_res]
+        bmw_min_score.append(min(bmw_scores) if bmw_scores else None)
+        bmw_max_score.append(max(bmw_scores) if bmw_scores else None)
+        exhaustive_min_score.append(min(exhaustive_scores) if exhaustive_scores else None)
+        exhaustive_max_score.append(max(exhaustive_scores) if exhaustive_scores else None)
+
+    query_matches = sum(rank_matches)
+
+    return (
+        rank_matches, query_matches,
+        missing_docids, extra_docids,
+        bmw_min_score, bmw_max_score,
+        exhaustive_min_score, exhaustive_max_score,
+    )
 
 def main():
     parser = argparse.ArgumentParser(
@@ -126,14 +173,24 @@ def main():
         benchmark_config = load_benchmark_config()
 
         logger.info(f"Comparing BMW vs exhaustive on {args.queryset}, k = {args.k}, first {args.x} queries...")
-        exact_matches, recall_at_1000 = compare_bmw_exhaustive(args.queryset, args.k, args.x)
+        (
+            rank_matches, query_matches,
+            missing_docids, extra_docids,
+            bmw_min_score, bmw_max_score,
+            exhaustive_min_score, exhaustive_max_score,
+        ) = compare_bmw_exhaustive(args.queryset, args.k, args.x)
 
         query_result_dir = Path(benchmark_config["paths"]["benchmark-dir"]) / "full-en" / QUERY_RESULT_FOLDER
         out_path = query_result_dir / "correctness_raw.parquet"
 
         logger.info(f"Writing correctness data to {out_path}.")
         write_correctness_parquet(
-            f"{args.queryset}_{args.k}_{args.x}", exact_matches, recall_at_1000, out_path
+            f"{args.queryset}_{args.k}_{args.x}",
+            rank_matches, query_matches,
+            missing_docids, extra_docids,
+            bmw_min_score, bmw_max_score,
+            exhaustive_min_score, exhaustive_max_score,
+            out_path
         )
 
 if __name__ == "__main__":
