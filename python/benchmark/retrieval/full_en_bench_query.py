@@ -68,7 +68,7 @@ def run_queries_exhaustive_perf_metrics(query_path: Path, k: int, cap: int = QUE
 
     k_list = list(k for i in range (len(queries)))
 
-    logger.info(f"Passing queries to BMW engine. Running engine...")
+    logger.info(f"Passing queries to Exhaustive engine. Running engine...")
     results, (engine_latency, query_latency) = scholar_rank_cpp.query_batch_exhaustive_benchmark(meta_path, query_list, k_list)
     logger.info(f"Engine finished running, returning benchmarked results.")
 

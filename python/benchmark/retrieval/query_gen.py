@@ -38,10 +38,11 @@ def _write_query_set(
     out_path: Path,
     n_queries: int = N_QUERIES,
     seed: int = SEED,
+    query_len_range: tuple[int, int] = QUERY_LEN_RANGE,
 ):
     """Write n_queries deterministic queries sampled from term_pool to out_path.
 
-    Each query draws a random length in QUERY_LEN_RANGE and that many
+    Each query draws a random length in query_len_range and that many
     distinct terms from term_pool (without replacement within a query,
     with replacement across queries).
     """
@@ -52,7 +53,7 @@ def _write_query_set(
     with open(out_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter="\t")
         for qid in range(n_queries):
-            query_len = rng.randint(*QUERY_LEN_RANGE)
+            query_len = rng.randint(*query_len_range)
             query_terms = rng.sample(terms, query_len)
             writer.writerow([qid, " ".join(query_terms)])
 
@@ -132,6 +133,61 @@ def generate_weighted_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
 
     logger.info("Finished generating weighted_set.")
 
+N_QUERIES_SHORT = 2000
+QUERY_LEN_RANGE_SHORT = (3, 4)
+
+def generate_short_random_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """short_random_set.tsv: uniform random sampling across the entire vocabulary."""
+    logger.info("Generating short_random_set...")
+    _write_query_set(
+        mapping_sorted, out_dir / "short_random_set.tsv",
+        n_queries=N_QUERIES_SHORT, query_len_range=QUERY_LEN_RANGE_SHORT
+    )
+    logger.info("Finished generating short_random_set.")
+
+def generate_short_common_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """short_common_set.tsv: terms drawn from the top 1% highest-df band."""
+    logger.info("Generating short_common_set...")
+    pool = _percentile_slice(mapping_sorted, 0.01)
+    _write_query_set(
+        pool, out_dir / "short_common_set.tsv",
+        n_queries=N_QUERIES_SHORT, query_len_range=QUERY_LEN_RANGE_SHORT
+    )
+    logger.info("Finished generating short_common_set.")
+
+def generate_short_very_common_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """short_very_common_set.tsv: terms drawn from the top 0.01% highest-df band."""
+    logger.info("Generating short_very_common_set...")
+    pool = _percentile_slice(mapping_sorted, 0.0001)
+    _write_query_set(
+        pool, out_dir / "short_very_common_set.tsv",
+        n_queries=N_QUERIES_SHORT, query_len_range=QUERY_LEN_RANGE_SHORT
+    )
+    logger.info("Finished generating short_very_common_set.")
+
+def generate_short_rare_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """short_rare_set.tsv: terms drawn from the bottom 10% lowest-df band."""
+    logger.info("Generating short_rare_set...")
+    pool = _percentile_slice(mapping_sorted, 0.1, from_end=True)
+    _write_query_set(
+        pool, out_dir / "short_rare_set.tsv",
+        n_queries=N_QUERIES_SHORT, query_len_range=QUERY_LEN_RANGE_SHORT
+    )
+    logger.info("Finished generating short_rare_set.")
+
+def generate_short_skewed_set(mapping_sorted: list[tuple[str, int]], out_dir: Path):
+    """short_skewed_set.tsv: terms drawn from the union of the top 0.01% and bottom 0.01% df band."""
+    logger.info("Generating short_skewed_set...")
+    pool = (
+        _percentile_slice(mapping_sorted, 0.0001)
+        + _percentile_slice(mapping_sorted, 0.0001, from_end=True)
+    )
+    _write_query_set(
+        pool, out_dir / "short_skewed_set.tsv",
+        n_queries=N_QUERIES_SHORT, query_len_range=QUERY_LEN_RANGE_SHORT
+    )
+    logger.info("Finished generating short_skewed_set.")
+
 def main():
     """Produced a few query set for full-en based on term occurences
 
@@ -177,6 +233,12 @@ def main():
     generate_rare_set(mapping_sorted, query_data_dir)
     generate_skewed_set(mapping_sorted, query_data_dir)
     generate_weighted_set(mapping_sorted, query_data_dir)
+
+    generate_short_random_set(mapping_sorted, query_data_dir)
+    generate_short_common_set(mapping_sorted, query_data_dir)
+    generate_short_very_common_set(mapping_sorted, query_data_dir)
+    generate_short_rare_set(mapping_sorted, query_data_dir)
+    generate_short_skewed_set(mapping_sorted, query_data_dir)
 
 if __name__ == "__main__":
     main()
