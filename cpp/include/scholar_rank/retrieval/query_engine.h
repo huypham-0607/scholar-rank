@@ -109,4 +109,12 @@ std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>,
     const std::vector<int> k
 );
 
+std::pair<std::vector<std::vector<std::pair<float, unsigned long long>>>,
+        std::pair<std::chrono::duration<double, std::milli>, std::vector<std::chrono::duration<double, std::milli>>>>
+        query_batch_exhaustive_benchmark(
+    const fs::path meta_path,
+    const std::vector<std::vector<std::string>> raw_terms,
+    const std::vector<int> k
+);
+
 #endif

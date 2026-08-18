@@ -75,6 +75,18 @@ PYBIND11_MODULE(scholar_rank_cpp, m) {
     );
 
     m.def(
+        "query_batch_exhaustive_benchmark",
+        &query_batch_exhaustive_benchmark,
+        py::arg("meta_path"), py::arg("terms"), py::arg("k"),
+        "Like query_batch_benchmark, but scores every candidate document "
+        "exhaustively (no WAND/BMW pruning) instead of using the pruned "
+        "query() path. Same return shape: (results, (index_load_elapsed, "
+        "query_elapsed)). Intended as a ground-truth/speed baseline to "
+        "compare against query_batch_benchmark on the same terms/k - results "
+        "should always match exactly, only elapsed timing should differ."
+    );
+
+    m.def(
         "read_term_df_mapping",
         &read_term_df_mapping,
         py::arg("meta_path"),

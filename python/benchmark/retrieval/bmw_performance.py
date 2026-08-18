@@ -57,16 +57,24 @@ def run_msmarco_single(filename: str) -> tuple:
 
     return query_latency_ms, engine_latency_ms, max_rss
 
-def run_full_en_single(filename: str, k: int) -> tuple:
+def run_full_en_single(
+    filename: str,
+    k: int,
+    engine: str = "bmw",
+    cap: int = full_en_bench_query.QUERY_SET_LEN,
+) -> tuple:
     benchmark_config = load_benchmark_config()
 
     query_path = Path(benchmark_config["paths"]["data-dir"]) / "full-en" / filename
 
-    logger.info(f"Started running full-en queries from {query_path}, k = {k}.")
+    logger.info(f"Started running full-en queries from {query_path}, k = {k}, engine = {engine}, cap = {cap}.")
 
-    engine_latency, query_latency = full_en_bench_query.run_queries_perf_metrics(query_path, k)
+    if engine == "exhaustive":
+        _, engine_latency, query_latency = full_en_bench_query.run_queries_exhaustive_perf_metrics(query_path, k, cap)
+    else:
+        _, engine_latency, query_latency = full_en_bench_query.run_queries_perf_metrics(query_path, k, cap)
 
-    logger.info(f"Finished running full-en queries from {query_path}, k = {k}.")
+    logger.info(f"Finished running full-en queries from {query_path}, k = {k}, engine = {engine}.")
 
     # query_batch_benchmark returns datetime.timedelta - convert to plain milliseconds
     query_latency_ms = [td.total_seconds() * 1000 for td in query_latency]
@@ -97,6 +105,18 @@ def main():
         help="Top-k depth to query at. Required when type=1 (full-en) - each k needs its own "
         "process invocation for RAM isolation. Ignored when type=0 (msmarco), which is fixed at k=1000."
     )
+    parser.add_argument(
+        "--engine", choices=["bmw", "exhaustive"], default="bmw",
+        help="Query engine variant to benchmark. Only applies when type=1 (full-en) - "
+        "'bmw' uses the pruned WAND/BMW query path, 'exhaustive' scores every candidate "
+        "document with no pruning. Ignored when type=0 (msmarco)."
+    )
+    parser.add_argument(
+        "--cap", type=int, default=full_en_bench_query.QUERY_SET_LEN,
+        help="Max number of queries to use from the query set. Only applies when type=1 "
+        "(full-en). Useful for keeping --engine=exhaustive runs tractable, since it has no "
+        "pruning to speed it up. Ignored when type=0 (msmarco)."
+    )
     args = parser.parse_args()
 
     if args.type == 1 and args.k is None:
@@ -108,10 +128,15 @@ def main():
         query_result_dir = Path(benchmark_config["paths"]["benchmark-dir"]) / "full-en" / QUERY_RESULT_FOLDER
         out_path = query_result_dir / "perf_raw.parquet"
 
-        logger.info(f"Current run: k = {args.k}...")
-        query_latency, engine_latency, max_rss = run_full_en_single(args.filename, args.k)
-        logger.info(f"Writing full-en performance data to {out_path}, k = {args.k}.")
-        write_perf_parquet(f"{args.filename}_{args.k}", query_latency, engine_latency, max_rss, out_path)
+        logger.info(f"Current run: k = {args.k}, engine = {args.engine}, cap = {args.cap}...")
+        query_latency, engine_latency, max_rss = run_full_en_single(args.filename, args.k, args.engine, args.cap)
+        logger.info(f"Writing full-en performance data to {out_path}, k = {args.k}, engine = {args.engine}.")
+        file_name = f"{args.filename}_{args.k}"
+        if args.engine == "exhaustive":
+            file_name += f"_{args.engine}"
+        write_perf_parquet(
+            file_name, query_latency, engine_latency, max_rss, out_path
+        )
 
     else:
         query_latency, engine_latency, max_rss = run_msmarco_single(args.filename)
