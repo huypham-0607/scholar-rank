@@ -1,6 +1,6 @@
-# scholar-rank
+# Startorch
 
-ScholarRank is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
+Startorch is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
 
 The goal is to utilize **Block-Max WAND** with **BM25 scoring**, **Global PageRank**, and **PPR** to query for top-k documents retrieval with **sub-second latency** across **500M+ research works** from OpenAlex database.
 
@@ -21,7 +21,7 @@ validated. See `docs/data_pipeline.md`.
 Supporting work: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to
 develop and validate against, instead of iterating against the full 510M-node graph on every change. C++ build
 system, logging, and a small shared utility layer (RAII file/mmap wrappers, variable-byte encoding) are
-working. On the Python side, a first pass at a real command-line tool (`scholar-rank`) and a shared config
+working. On the Python side, a first pass at a real command-line tool (`startorch`) and a shared config
 file (`project-config.toml`) now exist, currently covering fetching data and building the test subgraph.
 
 **Semantic/embedding retrieval: dropped for now**, not part of the near-term plan — judged too computationally
@@ -53,7 +53,7 @@ ambitious to take on alongside the three pillars above. May be revisited later (
 
 Modern literacy recommendation tools mainly focuses on keyword/semantic search, citation counts, or general LLM recommendation. Each of these methods has their own limitations.
 
-ScholarRank explores a different approach: Using the citation graph itself as a ranking signal.
+Startorch explores a different approach: Using the citation graph itself as a ranking signal.
 
 The goal is to build a literature discovery tool that is:
 - Computationally efficient
@@ -66,7 +66,7 @@ The goal is to build a literature discovery tool that is:
 Items marked ✅ exist and work (tested); ⏳ exist but incomplete; unmarked = not started yet.
 
 ```
-scholar-rank/
+startorch/
 ├── cpp/                                 C++ retrieval + (future) graph engine, built with CMake
 │   ├── CMakeLists.txt                  ✅ C++20, ctest wired up
 │   ├── include/, src/
@@ -79,8 +79,8 @@ scholar-rank/
 │   └── benchmarks/                     # BEIR/SNAP/OGB datasets already compiled, not wired up yet
 │
 ├── python/
-│   ├── src/scholar_rank/
-│   │   ├── cli.py                      ⏳ the `scholar-rank` command — ingest + gen-works-subset done,
+│   ├── src/startorch/
+│   │   ├── cli.py                      ⏳ the `startorch` command — ingest + gen-works-subset done,
 │   │   │                                  build-posting + query not added yet
 │   │   ├── ingest/fetch_data.py        ✅ EntityIngestor (base class) + WorksIngestor
 │   │   ├── works_subset/works_subset.py ✅ WorksSubsetter — builds the smaller test subgraph

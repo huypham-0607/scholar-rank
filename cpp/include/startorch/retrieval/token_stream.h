@@ -1,7 +1,7 @@
 #ifndef TOKEN_STREAM_H
 #define TOKEN_STREAM_H
 
-#include "scholar_rank/utils/file_io.h"
+#include "startorch/utils/file_io.h"
 #include <string>
 
 constexpr unsigned int MAX_TERM_LENGTH = (1<<15); // Might change depending on dataset

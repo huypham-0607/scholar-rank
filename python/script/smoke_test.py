@@ -38,40 +38,40 @@ def check(name):
     return wrap
 
 
-@check("import scholar_rank.utils")
+@check("import startorch.utils")
 def _():
-    import scholar_rank.utils  # noqa: F401
+    import startorch.utils  # noqa: F401
 
 
-@check("import scholar_rank.ingest.fetch_data")
+@check("import startorch.ingest.fetch_data")
 def _():
-    import scholar_rank.ingest.fetch_data  # noqa: F401
+    import startorch.ingest.fetch_data  # noqa: F401
 
 
-@check("import scholar_rank.works_subset.works_subset")
+@check("import startorch.works_subset.works_subset")
 def _():
-    import scholar_rank.works_subset.works_subset  # noqa: F401
+    import startorch.works_subset.works_subset  # noqa: F401
 
 
-@check("import scholar_rank.tokenizer.tokenizer")
+@check("import startorch.tokenizer.tokenizer")
 def _():
-    import scholar_rank.tokenizer.tokenizer  # noqa: F401
+    import startorch.tokenizer.tokenizer  # noqa: F401
 
 
-@check("import scholar_rank.cli")
+@check("import startorch.cli")
 def _():
-    import scholar_rank.cli  # noqa: F401
+    import startorch.cli  # noqa: F401
 
 
 @check("EntityIngestor.registry contains 'works' -> WorksIngestor")
 def _():
-    from scholar_rank.ingest.fetch_data import EntityIngestor, WorksIngestor
+    from startorch.ingest.fetch_data import EntityIngestor, WorksIngestor
     assert EntityIngestor.registry.get("works") is WorksIngestor, EntityIngestor.registry
 
 
 @check("EntityIngestor itself is not instantiable (still abstract)")
 def _():
-    from scholar_rank.ingest.fetch_data import EntityIngestor
+    from startorch.ingest.fetch_data import EntityIngestor
     try:
         EntityIngestor(Path("a"), Path("b"), Path("c"))
         raise AssertionError("EntityIngestor was instantiable - abstract methods not enforced")
@@ -81,14 +81,14 @@ def _():
 
 @check("abstract_inverted_index removed from WorksIngestor.extracted_columns and .columns")
 def _():
-    from scholar_rank.ingest.fetch_data import WorksIngestor
+    from startorch.ingest.fetch_data import WorksIngestor
     assert "abstract_inverted_index" not in WorksIngestor.extracted_columns, WorksIngestor.extracted_columns
     assert "abstract_inverted_index" not in WorksIngestor.columns, WorksIngestor.columns
 
 
 @check("WorksSubsetter constructs with (full_corpus_path, subset_path, spill_path, filter_condition)")
 def _():
-    from scholar_rank.works_subset.works_subset import WorksSubsetter
+    from startorch.works_subset.works_subset import WorksSubsetter
     s = WorksSubsetter(Path("full_corpus"), Path("subset"), Path("spill"), "language = 'en'")
     assert s.full_corpus_path == Path("full_corpus")
     assert s.subset_path == Path("subset")
@@ -126,11 +126,11 @@ def _():
 
 
 def _run_cli_help(subcommand_args):
-    """Invoke the real entry point (python -m scholar_rank.cli ...) as a subprocess,
+    """Invoke the real entry point (python -m startorch.cli ...) as a subprocess,
     the same way a user actually runs it - not just an in-process argparse call.
     This is what would have caught the original SyntaxError/typo bugs immediately."""
     proc = subprocess.run(
-        [PYTHON_EXE, "-m", "scholar_rank.cli", *subcommand_args, "--help"],
+        [PYTHON_EXE, "-m", "startorch.cli", *subcommand_args, "--help"],
         cwd=str(PYTHON_SRC), capture_output=True, text=True, timeout=30,
     )
     assert proc.returncode == 0, f"exit {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -160,7 +160,7 @@ def _():
     expected = set(config["works-subset"]["subset-profiles"].keys())
 
     proc = subprocess.run(
-        [PYTHON_EXE, "-m", "scholar_rank.cli", "gen-works-subset", "--help"],
+        [PYTHON_EXE, "-m", "startorch.cli", "gen-works-subset", "--help"],
         cwd=str(PYTHON_SRC), capture_output=True, text=True, timeout=30,
     )
     assert proc.returncode == 0, proc.stderr

@@ -1,7 +1,7 @@
-#include "scholar_rank/retrieval/construct_doc_len_list.h"
-#include "scholar_rank/retrieval/file_names.h"
-#include "scholar_rank/utils/file_io.h"
-#include "scholar_rank/utils/vbe.h"
+#include "startorch/retrieval/construct_doc_len_list.h"
+#include "startorch/retrieval/file_names.h"
+#include "startorch/utils/file_io.h"
+#include "startorch/utils/vbe.h"
 
 #include <cstdio>
 #include <filesystem>

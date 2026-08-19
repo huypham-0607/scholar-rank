@@ -1,4 +1,4 @@
-#include "scholar_rank/retrieval/posting_list.h"
+#include "startorch/retrieval/posting_list.h"
 
 #include <stdexcept>
 

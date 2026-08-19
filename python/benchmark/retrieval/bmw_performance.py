@@ -6,7 +6,7 @@ import ms_marco_pipeline
 import full_en_bench_query
 
 from pathlib import Path
-from scholar_rank import get_logger, load_benchmark_config, scholar_rank_cpp
+from startorch import get_logger, load_benchmark_config, startorch_cpp
 
 logger = get_logger(__name__)
 

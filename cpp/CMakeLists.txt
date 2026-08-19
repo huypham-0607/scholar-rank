@@ -32,7 +32,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 # Declaring project name and languanges.
-project(scholar_rank LANGUAGES CXX)
+project(startorch LANGUAGES CXX)
 
 # Includes
 include(FetchContent)
@@ -45,9 +45,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Defining a variable SCHOLAR_RANK_SOURCES, which will contains our sources.
+# Defining a variable STARTORCH_SOURCES, which will contains our sources.
 # Purely organization, but nice to have.
-set(SCHOLAR_RANK_SOURCES
+set(STARTORCH_SOURCES
     src/utils/logger.cpp
     src/utils/vbe.cpp
     src/utils/file_io.cpp
@@ -60,21 +60,21 @@ set(SCHOLAR_RANK_SOURCES
     src/retrieval/query_engine.cpp
 )
 
-# Building a library scholar_rank_core compiled from SCHOLAR_RANK_SOURCES.
+# Building a library startorch_core compiled from STARTORCH_SOURCES.
 # Future entry-point files will be linked with this.
-add_library(scholar_rank_core ${SCHOLAR_RANK_SOURCES})
+add_library(startorch_core ${STARTORCH_SOURCES})
 
-target_include_directories(scholar_rank_core PUBLIC
+target_include_directories(startorch_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # Adding CLI entry points (apps/)
 add_executable(build_inverted_blocks apps/build_inverted_blocks.cpp)
-target_link_libraries(build_inverted_blocks PRIVATE scholar_rank_core)
+target_link_libraries(build_inverted_blocks PRIVATE startorch_core)
 add_executable(build_doc_len_list apps/build_doc_len_list.cpp)
-target_link_libraries(build_doc_len_list PRIVATE scholar_rank_core)
+target_link_libraries(build_doc_len_list PRIVATE startorch_core)
 add_executable(merge_inverted_blocks apps/merge_inverted_blocks.cpp)
-target_link_libraries(merge_inverted_blocks PRIVATE scholar_rank_core)
+target_link_libraries(merge_inverted_blocks PRIVATE startorch_core)
 
 # Adding tests
 enable_testing()
@@ -86,36 +86,36 @@ FetchContent_Declare(pybind11 GIT_REPOSITORY https://github.com/pybind/pybind11.
 FetchContent_MakeAvailable(pybind11)
 
 add_executable(vbe_tests tests/utils/vbe_tests.cpp)
-target_link_libraries(vbe_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(vbe_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(file_io_tests tests/utils/file_io_tests.cpp)
-target_link_libraries(file_io_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(file_io_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(posting_list_tests tests/retrieval/posting_list_tests.cpp)
-target_link_libraries(posting_list_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(posting_list_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(bm25_tests tests/retrieval/bm25_tests.cpp)
-target_link_libraries(bm25_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(bm25_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(token_stream_tests tests/retrieval/token_stream_tests.cpp)
-target_link_libraries(token_stream_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(token_stream_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(construct_inverted_blocks_tests tests/retrieval/construct_inverted_blocks_tests.cpp)
-target_link_libraries(construct_inverted_blocks_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(construct_inverted_blocks_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(construct_doc_len_list_tests tests/retrieval/construct_doc_len_list_tests.cpp)
-target_link_libraries(construct_doc_len_list_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(construct_doc_len_list_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(merge_inverted_blocks_tests tests/retrieval/merge_inverted_blocks_tests.cpp)
-target_link_libraries(merge_inverted_blocks_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(merge_inverted_blocks_tests PRIVATE startorch_core GTest::gtest_main)
 
 add_executable(query_engine_tests tests/retrieval/query_engine_tests.cpp)
-target_link_libraries(query_engine_tests PRIVATE scholar_rank_core GTest::gtest_main)
+target_link_libraries(query_engine_tests PRIVATE startorch_core GTest::gtest_main)
 
-pybind11_add_module(scholar_rank_cpp python/bindings.cpp)
-target_link_libraries(scholar_rank_cpp PRIVATE scholar_rank_core)
-set_target_properties(scholar_rank_cpp PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../python/src/scholar_rank/_native"
+pybind11_add_module(startorch_cpp python/bindings.cpp)
+target_link_libraries(startorch_cpp PRIVATE startorch_core)
+set_target_properties(startorch_cpp PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../python/src/startorch/_native"
 )
 
 include(GoogleTest)

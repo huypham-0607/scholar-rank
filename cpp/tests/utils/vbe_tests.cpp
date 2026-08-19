@@ -1,5 +1,5 @@
-#include "scholar_rank/utils/vbe.h"
-#include "scholar_rank/utils/file_io.h"
+#include "startorch/utils/vbe.h"
+#include "startorch/utils/file_io.h"
 
 #include <random>
 #include <vector>

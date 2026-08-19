@@ -1,4 +1,4 @@
-# Algorithm Design for Scholar-Rank
+# Algorithm Design for Startorch
 
 <!-- Funny how this became a text-retrieval project from an authority ranking project -->
 
@@ -175,7 +175,7 @@ Items marked ✅ exist and work (tested); ⏳ exist but incomplete/stub only; un
 ```
 cpp/
 ├── CMakeLists.txt                      ✅ C++20, compile_commands.json, Release build, ctest wired up
-├── include/scholar_rank/
+├── include/startorch/
 │   ├── utils/
 │   │   ├── logger.h                    ✅
 │   │   ├── vbe.h                       ✅ variable-byte encoding
@@ -208,8 +208,8 @@ cpp/
 The Python side is being refactored alongside this (see `README.md` for the current roadmap):
 
 ```
-python/src/scholar_rank/
-├── cli.py                              ⏳ single scholar-rank command; ingest + gen-works-subset done,
+python/src/startorch/
+├── cli.py                              ⏳ single startorch command; ingest + gen-works-subset done,
 │                                            build-posting + query commands not added yet
 ├── utils.py                            ✅ shared logging/path helpers
 ├── ingest/fetch_data.py                ✅ EntityIngestor (base class) + WorksIngestor (the Works entity)

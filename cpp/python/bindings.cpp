@@ -2,15 +2,15 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
 #include <pybind11/chrono.h>
-#include "scholar_rank/retrieval/query_engine.h"
-#include "scholar_rank/retrieval/construct_doc_len_list.h"
-#include "scholar_rank/retrieval/construct_inverted_blocks.h"
-#include "scholar_rank/retrieval/merge_inverted_blocks.h"
-#include "scholar_rank/retrieval/file_names.h"
+#include "startorch/retrieval/query_engine.h"
+#include "startorch/retrieval/construct_doc_len_list.h"
+#include "startorch/retrieval/construct_inverted_blocks.h"
+#include "startorch/retrieval/merge_inverted_blocks.h"
+#include "startorch/retrieval/file_names.h"
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(scholar_rank_cpp, m) {
+PYBIND11_MODULE(startorch_cpp, m) {
     auto fn = m.def_submodule("file_names", "Centralized on-disk naming convention.");
     fn.attr("BLOCK_META") = file_names::BLOCK_META;
     fn.attr("METADATA_TXT") = file_names::METADATA_TXT;

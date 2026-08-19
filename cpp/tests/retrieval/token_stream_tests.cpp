@@ -1,5 +1,5 @@
-#include "scholar_rank/retrieval/token_stream.h"
-#include "scholar_rank/utils/file_io.h"
+#include "startorch/retrieval/token_stream.h"
+#include "startorch/utils/file_io.h"
 
 #include <cstdio>
 #include <filesystem>

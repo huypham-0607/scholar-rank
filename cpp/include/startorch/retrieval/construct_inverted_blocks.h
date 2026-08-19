@@ -1,8 +1,8 @@
 #ifndef CONSTRUCT_INVERTED_BLOCKS_H
 #define CONSTRUCT_INVERTED_BLOCKS_H
 
-#include "scholar_rank/retrieval/posting_list.h"
-#include "scholar_rank/utils/file_io.h"
+#include "startorch/retrieval/posting_list.h"
+#include "startorch/utils/file_io.h"
 
 #include <filesystem>
 #include <string>

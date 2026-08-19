@@ -1,6 +1,6 @@
 """Makes a smaller Works subset from the full corpus, for development and testing.
 
-Driven by the CLI (scholar-rank gen-works-subset) and project-config.toml.
+Driven by the CLI (startorch gen-works-subset) and project-config.toml.
 """
 
 import duckdb as db
@@ -8,7 +8,7 @@ import math
 import tomllib
 
 from pathlib import Path
-from scholar_rank import get_logger, get_current_time, PROJECT_ROOT
+from startorch import get_logger, get_current_time, PROJECT_ROOT
 
 logger = get_logger(__name__)
 

@@ -1,4 +1,4 @@
-#include "scholar_rank/retrieval/bm25.h"
+#include "startorch/retrieval/bm25.h"
 
 #include <cmath>
 

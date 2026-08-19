@@ -13,7 +13,7 @@ import pandas as pd
 
 from pathlib import Path
 from collections.abc import Callable
-from scholar_rank import get_logger
+from startorch import get_logger
 
 logger = get_logger(__name__)
 

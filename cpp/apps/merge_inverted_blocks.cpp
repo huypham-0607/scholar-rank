@@ -4,8 +4,8 @@
  * posting list & block metadata for corpus.
  */
 
-#include "scholar_rank/retrieval/merge_inverted_blocks.h"
-#include "scholar_rank/utils/logger.h"
+#include "startorch/retrieval/merge_inverted_blocks.h"
+#include "startorch/utils/logger.h"
 
 #include <filesystem>
 #include <format>

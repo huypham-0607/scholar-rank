@@ -5,7 +5,7 @@ import pandas as pd
 import full_en_bench_query
 
 from pathlib import Path
-from scholar_rank import get_logger, load_benchmark_config
+from startorch import get_logger, load_benchmark_config
 from ms_marco_pipeline import build_posting, run_queries
 
 logger = get_logger(__name__)

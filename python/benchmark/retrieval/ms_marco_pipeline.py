@@ -5,7 +5,7 @@ import tomllib
 import csv
 
 from pathlib import Path
-from scholar_rank import get_logger, load_benchmark_config, Tokenizer, scholar_rank_cpp, PROJECT_ROOT
+from startorch import get_logger, load_benchmark_config, Tokenizer, startorch_cpp, PROJECT_ROOT
 
 logger = get_logger(__name__)
 
@@ -127,7 +127,7 @@ def build_posting(
     posting_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / POSTING_FOLDER
     partial_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / PARTIAL_FOLDER
     
-    if not is_forced and (posting_dir / scholar_rank_cpp.file_names.METADATA_BIN).is_file():
+    if not is_forced and (posting_dir / startorch_cpp.file_names.METADATA_BIN).is_file():
         return
 
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -140,13 +140,13 @@ def build_posting(
     
     tokenizer.get_token(data_dir, token_stream_dir, spill_dir)
 
-    scholar_rank_cpp.build_doc_len(token_stream_dir, posting_dir)
-    scholar_rank_cpp.build_inverted_blocks(
+    startorch_cpp.build_doc_len(token_stream_dir, posting_dir)
+    startorch_cpp.build_inverted_blocks(
         token_stream_dir,
         partial_dir,
         MEM_LIMIT
     )
-    scholar_rank_cpp.merge_inverted_blocks(
+    startorch_cpp.merge_inverted_blocks(
         partial_dir,
         posting_dir,
         K1,
@@ -160,7 +160,7 @@ def run_queries(query_path: Path) -> tuple:
     Path(benchmark_config["paths"]["benchmark-dir"]).mkdir(parents=True, exist_ok=True)
 
     posting_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / POSTING_FOLDER
-    meta_path = posting_dir / scholar_rank_cpp.file_names.METADATA_BIN
+    meta_path = posting_dir / startorch_cpp.file_names.METADATA_BIN
 
     with open(query_path, mode='r', encoding='utf-8') as file:
         queries = list(csv.reader(file, delimiter='\t'))
@@ -171,14 +171,14 @@ def run_queries(query_path: Path) -> tuple:
     pid_list = list(pid for pid, _ in queries)
     k_list = list(1000 for i in range (len(queries)))
 
-    return pid_list, scholar_rank_cpp.query_batch(meta_path, query_list, k_list)
+    return pid_list, startorch_cpp.query_batch(meta_path, query_list, k_list)
 
 def run_queries_perf_metrics(query_path: Path) -> tuple:
     benchmark_config = load_benchmark_config()
     Path(benchmark_config["paths"]["benchmark-dir"]).mkdir(parents=True, exist_ok=True)
 
     posting_dir = Path(benchmark_config["msmarco"]["posting-dir"]) / POSTING_FOLDER
-    meta_path = posting_dir / scholar_rank_cpp.file_names.METADATA_BIN
+    meta_path = posting_dir / startorch_cpp.file_names.METADATA_BIN
 
     logger.info(f"Reading queries from {query_path}...")
 
@@ -196,7 +196,7 @@ def run_queries_perf_metrics(query_path: Path) -> tuple:
     k_list = list(1000 for i in range (len(queries)))
 
     logger.info(f"Passing queries to BMW engine. Running engine...")
-    _, (engine_latency, query_latency) = scholar_rank_cpp.query_batch_benchmark(meta_path, query_list, k_list)
+    _, (engine_latency, query_latency) = startorch_cpp.query_batch_benchmark(meta_path, query_list, k_list)
     logger.info(f"Engine finished running, returning benchmarked results.")
 
     return engine_latency, query_latency

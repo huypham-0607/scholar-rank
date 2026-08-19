@@ -1,4 +1,4 @@
-#include "scholar_rank/retrieval/token_stream.h"
+#include "startorch/retrieval/token_stream.h"
 
 #include <cstdio>
 #include <stdexcept>

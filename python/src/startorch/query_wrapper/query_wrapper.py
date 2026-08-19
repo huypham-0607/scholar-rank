@@ -5,7 +5,7 @@ import struct
 import duckdb as db
 
 from pathlib import Path
-from scholar_rank import get_logger, Tokenizer, scholar_rank_cpp
+from startorch import get_logger, Tokenizer, startorch_cpp
 
 def retrieve(
     query_string: str,
@@ -18,8 +18,8 @@ def retrieve(
     tokenizer = Tokenizer()
 
     terms = tokenizer.tokenize_query(query_string)
-    meta_path = root_path / posting_folder / scholar_rank_cpp.file_names.METADATA_BIN
-    results, elapsed = scholar_rank_cpp.query(
+    meta_path = root_path / posting_folder / startorch_cpp.file_names.METADATA_BIN
+    results, elapsed = startorch_cpp.query(
         meta_path,
         terms,
         k

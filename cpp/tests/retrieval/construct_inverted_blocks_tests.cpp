@@ -1,8 +1,8 @@
-#include "scholar_rank/retrieval/construct_inverted_blocks.h"
-#include "scholar_rank/retrieval/file_names.h"
-#include "scholar_rank/retrieval/posting_list.h"
-#include "scholar_rank/utils/file_io.h"
-#include "scholar_rank/utils/vbe.h"
+#include "startorch/retrieval/construct_inverted_blocks.h"
+#include "startorch/retrieval/file_names.h"
+#include "startorch/retrieval/posting_list.h"
+#include "startorch/utils/file_io.h"
+#include "startorch/utils/vbe.h"
 
 #include <algorithm>
 #include <cstdio>

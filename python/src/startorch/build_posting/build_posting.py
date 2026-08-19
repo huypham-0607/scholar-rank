@@ -3,7 +3,7 @@
 """
 
 from pathlib import Path
-from scholar_rank import get_logger, Tokenizer, scholar_rank_cpp
+from startorch import get_logger, Tokenizer, startorch_cpp
 
 
 class PostingBuildler:
@@ -60,13 +60,13 @@ class PostingBuildler:
         self.posting_path.mkdir(parents=True, exist_ok=True)
         self.partial_path.mkdir(parents=True, exist_ok=True)
 
-        scholar_rank_cpp.build_doc_len(self.token_stream_path, self.posting_path)
-        scholar_rank_cpp.build_inverted_blocks(
+        startorch_cpp.build_doc_len(self.token_stream_path, self.posting_path)
+        startorch_cpp.build_inverted_blocks(
             self.token_stream_path,
             self.partial_path,
             self.MEM_LIMIT
         )
-        scholar_rank_cpp.merge_inverted_blocks(
+        startorch_cpp.merge_inverted_blocks(
             self.partial_path,
             self.posting_path,
             self.K1,

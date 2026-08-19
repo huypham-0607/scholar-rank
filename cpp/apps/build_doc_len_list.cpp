@@ -3,8 +3,8 @@
  * @brief CLI entry point: document length list construction.
  */
 
-#include "scholar_rank/retrieval/construct_doc_len_list.h"
-#include "scholar_rank/utils/logger.h"
+#include "startorch/retrieval/construct_doc_len_list.h"
+#include "startorch/utils/logger.h"
 
 #include <filesystem>
 #include <format>

@@ -11,7 +11,7 @@ import argparse
 import tomllib
 
 from pathlib import Path
-from scholar_rank import EntityIngestor, WorksSubsetter, PROJECT_ROOT, get_logger, PostingBuildler, retrieve
+from startorch import EntityIngestor, WorksSubsetter, PROJECT_ROOT, get_logger, PostingBuildler, retrieve
 
 logger = get_logger(__name__)
 CONFIG_PATH = PROJECT_ROOT / "project-config.toml"
@@ -90,7 +90,7 @@ def cmd_query(args: argparse.Namespace, config: dict) -> None:
     )
 
 def build_parser(config: dict) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="scholar-rank")
+    parser = argparse.ArgumentParser(prog="startorch")
     subparsers = parser.add_subparsers(dest="command", required = True)
 
     # ingest

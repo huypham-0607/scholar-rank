@@ -1,4 +1,4 @@
-#include "scholar_rank/utils/logger.h"
+#include "startorch/utils/logger.h"
 
 #include <string>
 #include <chrono>

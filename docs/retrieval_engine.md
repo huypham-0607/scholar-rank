@@ -1,4 +1,4 @@
-# Retrieval Engine for Scholar-Rank
+# Retrieval Engine for Startorch
 
 ## 1. Okapi BM25 lexical retrieval
 

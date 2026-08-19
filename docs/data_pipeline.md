@@ -2,7 +2,7 @@
 
 ## What this is
 
-ScholarRank's citation graph is built from [OpenAlex](https://openalex.org/), a free, open catalog of
+Startorch's citation graph is built from [OpenAlex](https://openalex.org/), a free, open catalog of
 scholarly works. Rather than querying OpenAlex's API one paper at a time (far too slow for hundreds of
 millions of records), the pipeline pulls OpenAlex's full bulk data snapshot and processes it in bulk.
 

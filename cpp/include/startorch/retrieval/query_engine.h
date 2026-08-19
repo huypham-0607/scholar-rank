@@ -1,8 +1,8 @@
 #ifndef QUERY_ENGINE_H
 #define QUERY_ENGINE_H
 
-#include "scholar_rank/retrieval/merge_inverted_blocks.h"
-#include "scholar_rank/utils/file_io.h"
+#include "startorch/retrieval/merge_inverted_blocks.h"
+#include "startorch/utils/file_io.h"
 
 #include <limits>
 #include <vector>

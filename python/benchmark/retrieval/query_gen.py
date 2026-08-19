@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from pathlib import Path
-from scholar_rank import get_logger, load_config, load_benchmark_config, scholar_rank_cpp
+from startorch import get_logger, load_config, load_benchmark_config, startorch_cpp
 from ms_marco_pipeline import build_posting, run_queries_perf_metrics
 
 logger = get_logger(__name__)
@@ -222,7 +222,7 @@ def main():
     #     logger.info(f"All {len(query_sets)} sets already present, skipping...")
     #     return
 
-    mapping = scholar_rank_cpp.read_term_df_mapping(full_meta_path)
+    mapping = startorch_cpp.read_term_df_mapping(full_meta_path)
     mapping_sorted = sorted(mapping, key=lambda term_df: term_df[1], reverse=True)
 
     logger.info(f"Total no of terms: {len(mapping_sorted)}.")
