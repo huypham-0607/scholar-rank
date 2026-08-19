@@ -87,7 +87,7 @@ def run_full_en_single(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run one BMW performance benchmark and append its result to perf_raw.parquet. "
+        description="Run one BM25 performance benchmark and append its result to perf_raw.parquet. "
         "Invoke this once per (query file, k) combination (e.g. from a shell loop) rather than "
         "looping in-process, so each run gets its own OS process and therefore its own "
         "independent peak-RSS reading."
