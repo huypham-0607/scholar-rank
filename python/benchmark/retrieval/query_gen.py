@@ -191,7 +191,7 @@ def generate_short_skewed_set(mapping_sorted: list[tuple[str, int]], out_dir: Pa
 def main():
     """Produced a few query set for full-en based on term occurences
 
-    Each query set will have 10000 queries, each with length (number of terms) of [5,10].
+    Each query set will have 2000 queries, each with length (number of terms) of [5,10].
     
     Query sets will be saved in tsv. Format of all query sets are:
         qid query_string
