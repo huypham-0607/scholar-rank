@@ -1,140 +1,189 @@
 # Startorch
 
-Startorch is a graph-based, computationally efficient literature discovery engine that helps researchers query related papers in unfamiliar fields.
+**Startorch** is a literature search engine built around lexical retrieval and citation-graph ranking.
 
-The goal is to utilize **Block-Max WAND** with **BM25 scoring**, **Global PageRank**, and **PPR** to query for top-k documents retrieval with **sub-second latency** across **500M+ research works** from OpenAlex database.
+It currently targets the full OpenAlex Works corpus: 510M+ papers and roughly 3.1B citation edges. The retrieval layer uses BM25 with a custom Block-Max WAND implementation, while the graph side will use Global PageRank and approximate Personalized PageRank to rerank retrieved documents.
 
-# Project Status (as of 2026-08-13)
+The long-term goal is to support sub-second top-k retrieval over the full corpus while using the citation graph as an additional ranking signal, all while keeping RAM usage manageable for a personal device.
 
-**Data pipeline: done.** Full OpenAlex Works corpus (510M+ works, 241GB compact) fetched, extracted, and
-validated. See `docs/data_pipeline.md`.
+## Status
 
-**Three technical pillars:**
-- **Block-Max WAND** — a custom lexical retrieval engine (dynamic pruning, finds top-k results without scoring
-  every document), replacing DuckDB's built-in full-text search, which was too slow at full corpus scale.
-  Both halves are done and tested in C++: building the index, and answering a query against it (134 tests
-  passing). Not yet callable from outside C++ — see "Next steps" below. See `docs/retrieval_engine.md`.
-- **Global PageRank** — whole-graph authority score. Not started yet.
-- **Approximate top-k Personalized PageRank (local push)** — query-time, seed-driven authority that stays
-  bounded-memory by walking only the relevant part of the graph rather than the whole thing. Not started yet.
+As of August 18, 2026:
 
-Supporting work: a topic-restricted test subgraph (Mathematics field, ~4.7M works, real citation edges) to
-develop and validate against, instead of iterating against the full 510M-node graph on every change. C++ build
-system, logging, and a small shared utility layer (RAII file/mmap wrappers, variable-byte encoding) are
-working. On the Python side, a first pass at a real command-line tool (`startorch`) and a shared config
-file (`project-config.toml`) now exist, currently covering fetching data and building the test subgraph.
+### Data pipeline : Done
 
-**Semantic/embedding retrieval: dropped for now**, not part of the near-term plan — judged too computationally
-ambitious to take on alongside the three pillars above. May be revisited later (not before ~3 months out).
+The full OpenAlex Works corpus has been downloaded, extracted, compacted, and validated. The resulting dataset contains 510M+ works and occupies about 103.4 GB.
+
+See [`docs/data_pipeline.md`](docs/data_pipeline.md).
+
+### Retrieval engine: Done
+
+The C++ retrieval engine is implemented and tested.
+
+It currently supports:
+
+- tokenization and dense document-ID remapping
+- SPIMI-based inverted-index construction
+- BM25 scoring
+- Block-Max WAND query processing
+- block-level upper-bound metadata
+- variable-byte encoded posting lists
+
+Index construction and querying are both working in C++, with 154 GoogleTest cases passing.
+
+The engine is connected to Python CLI, which simple APIs for build posting lists, fetching data, and executing queries.
+
+Retrival engine is benchmarked in rank-safety, retrieval effectiveness, and query latency using both OpenAlex English subset and MS MARCO Passage Ranking datasets.
+
+See [`docs/bmw_technical_report.md`](docs/mw_technical_report.md).
+
+### Graph ranking
+
+Not started yet.
+
+Planned components are:
+
+- CSR/CSC storage for the citation graph
+- Global PageRank
+- approximate Personalized PageRank using local push
+
+PPR will be seeded from lexical retrieval results but will operate over the full citation graph rather than a graph restricted to the BM25 candidate set.
+
+### Development dataset
+
+To avoid iterating against the full 510M-node corpus during development, the repository can build a Mathematics-only OpenAlex subgraph containing roughly 4.7M works and their real citation edges.
+
+This is intended for graph development, correctness testing, and early benchmarks.
+
+### Python tooling
+
+A first version of the `startorch` CLI and shared `project-config.toml` configuration file are in place.
+
+The CLI currently supports data ingestion and test-subgraph generation. Index construction and querying still need to be connected to the C++ retrieval engine.
+
+### Semantic retrieval
+
+Embedding-based retrieval is currently out of scope.
+
+We originally planned to combine lexical, graph, and embedding-based retrieval, but running all three at OpenAlex scale would make the project considerably larger. For now, the focus is BM25/Block-Max WAND plus graph ranking.
+
+Semantic retrieval may be revisited later.
 
 ## Next steps
 
-1. **Finish the Python side**: add the remaining command-line steps (building the index, running a query), and
-   connect Python's query tokenizer to the C++ query engine, so a search can be run end to end from one command.
-2. **Benchmark the C++ engine**: measure how fast Block-Max WAND retrieval is, and how good the results are.
-3. **Then, one of two directions** (not decided yet): build a small demo of the project working end to end, or
-   move straight on to the graph side — CSR/CSC graph storage, feeding into Global PageRank.
+The immediate work is:
 
-## Current progress & near-term todo
+1. Connect the Python CLI to the C++ retrieval engine.
+2. Add CLI commands for index construction and querying.
+3. Benchmark Block-Max WAND latency, throughput, memory use, and retrieval quality.
+4. Begin the graph representation and Global PageRank implementation.
+5. Add approximate PPR once the graph infrastructure is stable.
 
-- [x] Data pipeline (Phase 1)
-- [x] Tokenization/normalization pipeline (incl. dense doc_id remapping)
-- [x] Development test subgraph (Mathematics field subset)
-- [x] C++ build system + logging
-- [x] Block-Max WAND index construction (SPIMI build + BMW block-metadata merge, C++)
-- [x] Block-Max WAND query engine (C++)
-- [ ] Python command-line tool + config, connected end-to-end to the C++ engine
-- [ ] Benchmark the C++ retrieval engine
-- [ ] Global PageRank (C++)
-- [ ] Approximate top-k Personalized PageRank (C++)
-- [ ] End-to-end validation against public benchmarks (BEIR for lexical, SNAP/OGB citation graphs for ranking)
+After the retrieval benchmark, I may build a small end-to-end demo before moving to the graph side.
 
-# Project Motivation
+## Progress
 
-Modern literacy recommendation tools mainly focuses on keyword/semantic search, citation counts, or general LLM recommendation. Each of these methods has their own limitations.
+- [x] OpenAlex data pipeline
+- [x] tokenization and normalization
+- [x] dense document-ID remapping
+- [x] Mathematics development subgraph
+- [x] C++20/CMake build system
+- [x] logging and shared C++ utilities
+- [x] SPIMI inverted-index construction
+- [x] Block-Max WAND metadata construction
+- [x] Block-Max WAND query engine
+- [x] BM25 scoring
+- [x] C++ retrieval tests
+- [ ] connect Python CLI to C++ retrieval
+- [ ] benchmark retrieval engine
+- [ ] CSR/CSC citation-graph representation
+- [ ] Global PageRank
+- [ ] approximate Personalized PageRank
+- [ ] public benchmark evaluation
 
-Startorch explores a different approach: Using the citation graph itself as a ranking signal.
+Planned external benchmarks include BEIR for lexical retrieval and SNAP/OGB citation graphs for graph algorithms.
 
-The goal is to build a literature discovery tool that is:
-- Computationally efficient
-- Scalable to large citation graphs
-- Explainable
-- Benchmarkable
+## Why this project?
 
-# Project structure
+Most literature search systems rely primarily on lexical search, embedding similarity, citation counts, or learned recommendation systems.
 
-Items marked ✅ exist and work (tested); ⏳ exist but incomplete; unmarked = not started yet.
+Startorch is an experiment in using the citation graph more directly.
 
-```
+The main question is whether a combination of:
+
+- Lexical relevance,
+- Global graph authority, and
+- Query-specific graph authority
+
+can produce useful literature recommendations while remaining efficient enough to run over a graph with hundreds of millions of papers.
+
+The project is also an excuse to implement the underlying systems rather than treating retrieval and ranking as black boxes. In particular, the current work focuses on compressed inverted indexes, dynamic pruning, large graph representations, and bounded-memory graph algorithms.
+
+## Repository layout
+
+Items marked ✅ are implemented and working. Items marked ⏳ exist but are incomplete.
+
+```text
 startorch/
-├── cpp/                                 C++ retrieval + (future) graph engine, built with CMake
-│   ├── CMakeLists.txt                  ✅ C++20, ctest wired up
-│   ├── include/, src/
-│   │   ├── utils/                      ✅ SafeFile/SafeFileMmap (RAII wrappers), logger, variable-byte encoding
-│   │   ├── retrieval/                  ✅ SPIMI index construction + BMW query engine — done and tested
-│   │   └── graph/                      # CSR/CSC, PageRank, PPR — not started
-│   ├── apps/                           ✅ CLI: build_inverted_blocks, build_doc_len_list, merge_inverted_blocks
-│   │                                      (no CLI entry point for running a query yet)
-│   ├── tests/                          ✅ 134 GoogleTest cases (`ctest --test-dir build`)
-│   └── benchmarks/                     # BEIR/SNAP/OGB datasets already compiled, not wired up yet
+├── cpp/
+│   ├── CMakeLists.txt                  ✅ C++20 build, ctest integration
+│   ├── include/
+│   ├── src/
+│   │   ├── utils/                      ✅ mmap/file wrappers, logging, VByte encoding
+│   │   ├── retrieval/                  ✅ SPIMI index + Block-Max WAND query engine
+│   │   └── graph/                      CSR/CSC, PageRank, PPR
+│   ├── apps/                           ✅ index-construction command-line tools
+│   ├── tests/                          ✅ 134 GoogleTest cases
+│   └── benchmarks/                     benchmark datasets and future harnesses
 │
 ├── python/
 │   ├── src/startorch/
-│   │   ├── cli.py                      ⏳ the `startorch` command — ingest + gen-works-subset done,
-│   │   │                                  build-posting + query not added yet
-│   │   ├── ingest/fetch_data.py        ✅ EntityIngestor (base class) + WorksIngestor
-│   │   ├── works_subset/works_subset.py ✅ WorksSubsetter — builds the smaller test subgraph
-│   │   ├── tokenizer/tokenizer.py      ✅ tokenization + dense doc_id remapping
-│   │   └── utils.py                    ✅ shared logging/path helpers
-│   ├── script/smoke_test.py            ✅ dependency-free sanity checks for the CLI
-│   └── notebook/                       exploratory/one-off analysis (null-rate sweeps, backfills, etc.)
+│   │   ├── cli.py                      ⏳ main `startorch` CLI
+│   │   ├── ingest/
+│   │   │   └── fetch_data.py           ✅ OpenAlex ingestion
+│   │   ├── works_subset/
+│   │   │   └── works_subset.py         ✅ development-subgraph generation
+│   │   ├── tokenizer/
+│   │   │   └── tokenizer.py            ✅ tokenization + document-ID remapping
+│   │   └── utils.py                    ✅ shared helpers
+│   ├── script/
+│   │   └── smoke_test.py               ✅ CLI smoke tests
+│   └── notebook/                       exploratory analysis
 │
-├── docs/                                design docs
-│   ├── initialization.md               full project spec: phases 1-5, success criteria
-│   ├── algorithm_design.md             Phase 4 retrieval/scoring design, full cpp/python project tree
-│   ├── retrieval_engine.md             BM25/Block-Max WAND design, in depth
-│   ├── data_pipeline.md                Phase 1 pipeline design (complete)
+├── docs/
+│   ├── initialization.md               overall project plan
+│   ├── algorithm_design.md             retrieval/ranking design
+│   ├── retrieval_engine.md             BM25 + Block-Max WAND implementation
+│   ├── data_pipeline.md                OpenAlex ingestion pipeline
 │   └── data_reference.md               OpenAlex field reference
 │
-├── project-config.toml                 ✅ paths + subset filter profiles, read by the CLI
-├── data/                                local only, gitignored: openalex/ (raw, transient), compact/ (kept)
-└── README.md                            this file
+├── project-config.toml                 ✅ shared paths and subset configuration
+├── data/                               local data; gitignored
+└── README.md
 ```
 
-See `docs/algorithm_design.md` for the file-by-file breakdown of `cpp/` and `python/`.
-
-# Design Overview
-
-Goals of this project:
-- Design a system that searches for related papers for particular paper/topic
-- Optimize such queries using traditional optimization/heuristics to be commercially viable.
-- Run this system on OpenAlex full graph, benchmark the results.
-
-General Idea:
-A paper's relevance score for a given query combines three signals — full formula and pipeline design in
-`docs/algorithm_design.md`:
-
-- **Relevance ($R(d,q)$)** — how well a paper textually/semantically matches the query.
-  - *Active*: BM25 over title/topic-hierarchy/keywords, served by a custom Block-Max WAND engine (retrieves
-    top-k without scoring every document — DuckDB's built-in full-text index was tried first, too slow at
-    full corpus scale). See `docs/retrieval_engine.md`.
-  - *Dropped for now*: embedding-based semantic relevance — too computationally ambitious to take on alongside
-    the current milestone. See Project Status above.
-- **Local authority ($LA(d,q)$)** — a paper's graph-based authority *relative to the query*. Approximate top-k
-  - Personalized PageRank / local push, seeded from BM25 candidates but walking the **full** citation graph, not just the candidate subset.
-- **Global authority ($GA(d)$)** — a paper's general citation-graph prestige, independent of any query.
-  - Global PageRank is the primary signal here.
-  - HITS/SALSA is a secondary candidate, currently under limited research.
-
-**Current focus is finishing the retrieval path** — connecting the finished Block-Max WAND engine to a real
-command-line tool, then benchmarking it (see "Next steps" above), before deciding whether to build a small
-demo or move on to the graph engine behind $LA(d,q)$ and $GA(d)$. The citation graph itself, not
-keyword/semantic matching, remains the project's core technical thesis — retrieval is the supporting layer
-that needs to work first.
+A more detailed file-by-file description is available in [`docs/algorithm_design.md`](docs/algorithm_design.md).
 
 ## References
-- [The anatomy of a large-scale hypertextual Web search engine](https://snap.stanford.edu/class/cs224w-readings/Brin98Anatomy.pdf)
-- [The $25,000,000,000 Eigenvector: The Linear Algebra Behind Google](https://www.rose-hulman.edu/~bryan/googleFinalVersionFixed.pdf)
-- [Deeper Inside PageRank](https://www.stat.uchicago.edu/~lekheng/meetings/mathofranking/ref/langville.pdf)
-- [The Probabilistic Relevance Framework:
-BM25 and Beyond](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)
+
+- Brin, S. and Page, L.  
+  [*The Anatomy of a Large-Scale Hypertextual Web Search Engine*](https://snap.stanford.edu/class/cs224w-readings/Brin98Anatomy.pdf)
+
+- Austin, D.  
+  [*The $25,000,000,000 Eigenvector: The Linear Algebra Behind Google*](https://www.rose-hulman.edu/~bryan/googleFinalVersionFixed.pdf)
+
+- Langville, A. and Meyer, C.  
+  [*Deeper Inside PageRank*](https://www.stat.uchicago.edu/~lekheng/meetings/mathofranking/ref/langville.pdf)
+
+- Robertson, S. and Zaragoza, H.  
+  [*The Probabilistic Relevance Framework: BM25 and Beyond*](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)
+
+- **WAND (Weak AND)** — Broder, Carmel, Herscovici, Soffer, Zien, [*"Efficient Query Evaluation using a Two-Level Retrieval Process"*](https://www.researchgate.net/publication/221613425_Efficient_query_evaluation_using_a_two-level_retrieval_process)
+  (CIKM 2003).
+
+- **Block-Max WAND (BMW)** — Ding & Suel, [*"Faster Top-k Document Retrieval Using Block-Max Indexes"*](https://research.engineering.nyu.edu/~suel/papers/bmw.pdf)
+  (SIGIR 2011). 
+
+- [PISA](https://github.com/pisa-engine/pisa) 
+
+- Manning, Raghavan & Schütze, *Introduction to Information Retrieval*
