@@ -1,0 +1,41 @@
+{
+  "corpus": {
+    "total_docs": 345701167,
+    "total_occurrences": 13733787707
+  },
+  "index_composition": {
+    "unique_terms": 24698967,
+    "total_postings": 8960802200,
+    "total_blocks": 93937047,
+    "block_size": 128,
+    "mean_doc_len": 39.72733973154334
+  },
+  "df_percentiles": {
+    "min": 1,
+    "p50": 1,
+    "p90": 4,
+    "p99": 233,
+    "p99.99": 364624,
+    "max": 272086781
+  },
+  "strata": [
+    {
+      "stratum": "Rare (bottom 10%)",
+      "df_min": 1,
+      "df_max": 1,
+      "n_terms": 2469896
+    },
+    {
+      "stratum": "Common (top 1%)",
+      "df_min": 233,
+      "df_max": 272086781,
+      "n_terms": 246989
+    },
+    {
+      "stratum": "Very common (top 0.01%)",
+      "df_min": 364638,
+      "df_max": 272086781,
+      "n_terms": 2469
+    }
+  ]
+}
