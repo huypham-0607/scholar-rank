@@ -35,7 +35,7 @@ The engine is connected to Python CLI, which simple APIs for build posting lists
 
 Retrival engine is benchmarked in rank-safety, retrieval effectiveness, and query latency using both OpenAlex English subset and MS MARCO Passage Ranking datasets.
 
-See [`docs/bmw_technical_report.md`](docs/mw_technical_report.md).
+See [`docs/bmw_technical_report.md`](docs/bmw_technical_report.md).
 
 ### Graph ranking
 
