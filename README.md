@@ -2,9 +2,23 @@
 
 **Startorch** is a literature search engine built around lexical retrieval and citation-graph ranking.
 
-It currently targets the full OpenAlex Works corpus: 510M+ papers and roughly 3.1B citation edges. The retrieval layer uses BM25 with a custom Block-Max WAND implementation, while the graph side will use Global PageRank and approximate Personalized PageRank to rerank retrieved documents.
+It currently targets the OpenAlex English-only Works corpus: 345M+ papers. The retrieval layer uses BM25 with a custom Block-Max WAND implementation, while the graph side will use Global PageRank and approximate Personalized PageRank to rerank retrieved documents.
 
 The long-term goal is to support sub-second top-k retrieval over the full corpus while using the citation graph as an additional ranking signal, all while keeping RAM usage manageable for a personal device.
+
+## Why this project?
+
+Startorch is an experiment in using the citation graph more directly for research artifact retrieval.
+
+The main question is whether a combination of:
+
+- Lexical relevance,
+- Global graph authority, and
+- Query-specific graph authority
+
+can produce useful literature recommendations while remaining efficient enough to run over a graph with hundreds of millions of papers.
+
+The project is also an excuse to implement the underlying systems rather than treating retrieval and ranking as black boxes. In particular, the current work focuses on compressed inverted indexes, dynamic pruning, large graph representations, and bounded-memory graph algorithms.
 
 ## Status
 
@@ -97,20 +111,6 @@ The future plan for this project is:
 - [ ] approximate Personalized PageRank
 - [ ] public benchmark evaluation
 
-## Why this project?
-
-Startorch is an experiment in using the citation graph more directly for research artifact retrieval.
-
-The main question is whether a combination of:
-
-- Lexical relevance,
-- Global graph authority, and
-- Query-specific graph authority
-
-can produce useful literature recommendations while remaining efficient enough to run over a graph with hundreds of millions of papers.
-
-The project is also an excuse to implement the underlying systems rather than treating retrieval and ranking as black boxes. In particular, the current work focuses on compressed inverted indexes, dynamic pruning, large graph representations, and bounded-memory graph algorithms.
-
 ## Repository layout
 
 Items marked ✅ are implemented and working. Items marked ⏳ exist but are incomplete.
@@ -130,7 +130,7 @@ startorch/
 │
 ├── python/
 │   ├── src/startorch/
-│   │   ├── cli.py                      ⏳ main `startorch` CLI
+│   │   ├── cli.py                      ✅ main `startorch` CLI
 │   │   ├── ingest/
 │   │   │   └── fetch_data.py           ✅ OpenAlex ingestion
 │   │   ├── works_subset/
