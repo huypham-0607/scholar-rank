@@ -59,7 +59,7 @@ This is intended for graph development, correctness testing, and early benchmark
 
 A first version of the `startorch` CLI and shared `project-config.toml` configuration file are in place.
 
-The CLI currently supports data ingestion and test-subgraph generation. Index construction and querying still need to be connected to the C++ retrieval engine.
+The CLI currently supports the full retrieval pipeline, including data ingestion, test-subgraph generation, building inverted indicies & posting lists, and query engine.
 
 ### Semantic retrieval
 
@@ -71,15 +71,11 @@ Semantic retrieval may be revisited later.
 
 ## Next steps
 
-The immediate work is:
+The future plan for this project is:
 
-1. Connect the Python CLI to the C++ retrieval engine.
-2. Add CLI commands for index construction and querying.
-3. Benchmark Block-Max WAND latency, throughput, memory use, and retrieval quality.
-4. Begin the graph representation and Global PageRank implementation.
-5. Add approximate PPR once the graph infrastructure is stable.
-
-After the retrieval benchmark, I may build a small end-to-end demo before moving to the graph side.
+1. Begin the graph representation and Global PageRank implementation.
+2. Add approximate PPR once the graph infrastructure is stable.
+3. Potentially revisit retrieval design to optimize for performance, particularly in memory usage.
 
 ## Progress
 
@@ -94,20 +90,16 @@ After the retrieval benchmark, I may build a small end-to-end demo before moving
 - [x] Block-Max WAND query engine
 - [x] BM25 scoring
 - [x] C++ retrieval tests
-- [ ] connect Python CLI to C++ retrieval
-- [ ] benchmark retrieval engine
+- [x] connect Python CLI to C++ retrieval
+- [x] benchmark retrieval engine
 - [ ] CSR/CSC citation-graph representation
 - [ ] Global PageRank
 - [ ] approximate Personalized PageRank
 - [ ] public benchmark evaluation
 
-Planned external benchmarks include BEIR for lexical retrieval and SNAP/OGB citation graphs for graph algorithms.
-
 ## Why this project?
 
-Most literature search systems rely primarily on lexical search, embedding similarity, citation counts, or learned recommendation systems.
-
-Startorch is an experiment in using the citation graph more directly.
+Startorch is an experiment in using the citation graph more directly for research artifact retrieval.
 
 The main question is whether a combination of:
 
